@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "id": "x2rock.sonos",
+  "name": "Sonos",
+  "version": "0.1.0",
+  "author": "Richard Hoelscher",
+  "description": "Per-room Sonos control via x2rock: now-playing, transport, and room volume",
+  "kinds": ["bar-widget"],
+  "entryPoints": {
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Sonos",
+    "description": "Rooms with per-room volume, driven by the x2rock MPRIS daemon",
+    "category": "Media",
+    "allowMultiple": false
+  }
+}
