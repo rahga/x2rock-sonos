@@ -480,9 +480,15 @@ BarWidget {
     // can come from a service that is not `searchService`, and playing it as
     // though it did would hand one service's id to another.
     var service = String(item.service || root.searchService)
-    playFavoriteProc.command = [root.command, "play-item", "-s", service,
-                                String(item.id), "--title", String(item.name || ""),
-                                "-r", room]
+    // The row's kind decides how it plays: a live stream is streamed, and
+    // anything on-demand has to go in the queue, because the player is the only
+    // thing that can resolve a service's protected media. Passing it saves the
+    // CLI a guess it would otherwise have to make by trying and falling back.
+    var command = [root.command, "play-item", "-s", service,
+                   String(item.id), "--title", String(item.name || ""),
+                   "-r", room]
+    if (item.type) command.push("--kind", String(item.type))
+    playFavoriteProc.command = command
     playFavoriteProc.running = true
     root.closePicker()
     root.backToRooms()
