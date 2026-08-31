@@ -1529,9 +1529,16 @@ BarWidget {
         visible: root.favoritesLoaded || root.searchStatus !== ""
         // The status goes here rather than over the list: a search that is
         // running, or that failed, must not take away the rows already shown.
-        text: root.searchStatus !== ""
-          ? root.searchStatus
-          : root.shownFavorites.length + (root.filterText !== "" ? " " + root.strings.of + " " + root.favorites.length : "")
+        // The favorites status joins it whenever the list is up, so a failed
+        // favorites load is still reported instead of being swallowed by the
+        // rows that survived it.
+        text: {
+          if (root.searchStatus !== "") return root.searchStatus
+          if (root.favoritesStatus !== "" && root.pickerRows.length > 0)
+            return root.favoritesStatus
+          return root.shownFavorites.length
+            + (root.filterText !== "" ? " " + root.strings.of + " " + root.favorites.length : "")
+        }
         color: root.secondaryFg
         font.family: root.bar.fontFamily
         font.pixelSize: Style.font.caption
@@ -1579,10 +1586,13 @@ BarWidget {
 
       Text {
         id: pickerStatus
-        // Only when there is genuinely nothing to show. With search on there is
-        // almost always a row - the search action itself - so this now speaks
-        // for a failed favorites load rather than for an empty filter.
-        visible: root.favoritesStatus !== "" || (root.favoritesLoaded && root.pickerRows.length === 0)
+        // Only when there is genuinely nothing to show. A status must not
+        // pre-empt the list: on a household with no favorites at all,
+        // favoritesStatus is permanently set, and keying off it hid the search
+        // row along with the empty list it was describing. Whatever the status
+        // has to say is still said, in the count line, where it costs no rows.
+        visible: root.pickerRows.length === 0
+                 && (root.favoritesLoaded || root.favoritesStatus !== "")
         text: root.favoritesStatus !== "" ? root.favoritesStatus : root.strings.noMatch
         color: root.secondaryFg
         font.family: root.bar.fontFamily
