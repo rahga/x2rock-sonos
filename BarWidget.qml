@@ -206,7 +206,11 @@ BarWidget {
 
     if (searchedTerm === term) {
       var hits = searchResults
-      for (var j = 0; j < hits.length; j++) rows.push({ kind: "result", item: hits[j] })
+      // A hit is not always a thing to play. Every Mixcloud search result is a
+      // `tag:` collection, so a search can answer entirely in places - and
+      // offering one as a track would hand a container id to `play-item`.
+      for (var j = 0; j < hits.length; j++)
+        rows.push({ kind: hits[j].container ? "container" : "result", item: hits[j] })
       if (hits.length === 0)
         rows.push({ kind: "note", item: { name: strings.noResults, type: "", art_url: "" } })
     } else {
@@ -231,8 +235,11 @@ BarWidget {
     else if (row.kind === "result") root.playSearchResult(root.pickingFor, row.item)
     else if (row.kind === "search") root.runSearch()
     else if (row.kind === "browseService") root.browseInto(row.item.service, "root", row.item.service)
-    else if (row.kind === "container") root.browseInto(root.browseFrame.service,
-                                                      row.item.id, row.item.name)
+    else if (row.kind === "container")
+      // The row's own service when it has one - a container can arrive as a
+      // *search* hit, with no browse frame open to inherit a service from.
+      root.browseInto(row.item.service || (root.browseFrame ? root.browseFrame.service : ""),
+                      row.item.id, row.item.name)
     else if (row.kind === "browseItem") root.playSearchResult(root.pickingFor, row.item)
     else if (row.kind === "up") root.browseUp()
     // "note" is not actionable; selecting it and pressing Enter does nothing,
