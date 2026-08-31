@@ -975,9 +975,18 @@ BarWidget {
 
   /// A browse row's second line: its kind, and whatever the service offered as
   /// a description. Not the service name - the title bar already says it.
+  ///
+  /// **A container shows no kind at all.** The `\u203a` at the end of the row
+  /// already says "somewhere to go", and the word underneath would be the
+  /// service's own jargon rather than anything a person wants: TuneIn types
+  /// every one of its featured sections `container`, so its root read
+  /// "iHeartRadio / container", and iHeartRadio types one of its own
+  /// `favorites`. Both are implementation words that leaked to the surface.
+  /// A *playable* row keeps its kind, because "stream" or "album" is a real
+  /// answer to what pressing it will do.
   function browseSubtitle(item) {
     var parts = []
-    if (item.type) {
+    if (item.type && !item.container) {
       var raw = String(item.type)
       var key = "kind" + raw.charAt(0).toUpperCase() + raw.slice(1).toLowerCase()
       parts.push(root.strings[key] || raw.toLowerCase())
