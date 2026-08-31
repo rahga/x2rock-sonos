@@ -94,6 +94,39 @@ BarWidget {
   /// typed now.
   property string pendingTerm: ""
 
+  // Walking a service's containers. A stack rather than a current-id, because
+  // the useful gesture is "back where I came from" and only the path knows
+  // where that is. Empty means the picker is at home, showing favorites.
+  //
+  // Each frame is { service, id, title }. The first frame's id is "root", which
+  // is where every service starts.
+  property var browseStack: []
+  property var browseItems: []
+  property string browseStatus: ""
+  /// The frame `browseItems` answers. A reply that arrives after someone has
+  /// already gone back belongs to a container nobody is looking at, and showing
+  /// it would silently move them somewhere they did not ask to be.
+  property string browseAnsweredFor: ""
+
+  readonly property bool browsing: browseStack.length > 0
+  readonly property var browseFrame: browsing ? browseStack[browseStack.length - 1] : null
+
+  // The same local filter the favorites list gets, over whatever container is
+  // open. No round trip: a container is already in hand, and typing must not
+  // put a network call behind a keystroke.
+  readonly property var shownBrowseItems: {
+    var needle = filterText.toLowerCase().trim()
+    if (needle === "") return browseItems
+    var found = []
+    for (var i = 0; i < browseItems.length; i++) {
+      var it = browseItems[i]
+      var name = String(it.name || "").toLowerCase()
+      var by = String(it.description || "").toLowerCase()
+      if (name.indexOf(needle) !== -1 || by.indexOf(needle) !== -1) found.push(it)
+    }
+    return found
+  }
+
   // Name or service, so "sonos" finds the radio stations and "bed" finds the
   // bedtime mixes. There are dozens of these; scrolling to one is the fallback,
   // not the plan.
@@ -121,6 +154,33 @@ BarWidget {
   // chosen. Searching on every keystroke would put a network round trip behind
   // typing, which is the behaviour this widget exists to avoid.
   readonly property var pickerRows: {
+    // Inside a container the list is that container and nothing else. Mixing
+    // favorites into it would make "back" ambiguous and the count meaningless.
+    if (browsing) {
+      var out = [{
+        kind: "up",
+        item: {
+          name: strings.up.arg(browseStack.length > 1
+                               ? browseStack[browseStack.length - 2].title
+                               : browseFrame.service),
+          type: "",
+          art_url: ""
+        }
+      }]
+      // Only once the reply belongs to the container on screen. Until then the
+      // status line says what is happening and the list stays honest.
+      if (browseAnsweredFor === browseKey(browseFrame)) {
+        var walk = shownBrowseItems
+        for (var b = 0; b < walk.length; b++)
+          out.push({ kind: walk[b].container ? "container" : "browseItem", item: walk[b] })
+        if (walk.length === 0)
+          out.push({ kind: "note", item: { name: browseItems.length > 0
+                                                 ? strings.noMatch : strings.browseEmpty,
+                                           type: "", art_url: "" } })
+      }
+      return out
+    }
+
     var rows = []
     var favs = shownFavorites
     for (var i = 0; i < favs.length; i++) rows.push({ kind: "favorite", item: favs[i] })
@@ -128,6 +188,18 @@ BarWidget {
     // and these are what this machine happens to remember.
     var kept = shownBookmarks
     for (var k = 0; k < kept.length; k++) rows.push({ kind: "bookmark", item: kept[k] })
+
+    // The way in to each service's own containers, and an *action* like the
+    // search row: nothing leaves the machine until one is chosen. Listed after
+    // what is already in hand, because a name someone saved beats a tree they
+    // have to walk.
+    var services = browseServices
+    for (var v = 0; v < services.length; v++)
+      rows.push({
+        kind: "browseService",
+        item: { name: strings.browseIn.arg(services[v]), type: "", art_url: "",
+                service: services[v] }
+      })
 
     var term = filterText.trim()
     if (!searchEnabled || term === "") return rows
@@ -146,12 +218,23 @@ BarWidget {
     return rows
   }
 
+  /// A frame's identity, for telling "the reply I am waiting for" from "a reply
+  /// to somewhere I have already left".
+  function browseKey(frame) {
+    return frame ? frame.service + "\u0000" + frame.id : ""
+  }
+
   function activateRow(row) {
     if (!row) return
     if (row.kind === "favorite") root.playFavorite(root.pickingFor, row.item)
     else if (row.kind === "bookmark") root.playBookmark(root.pickingFor, row.item)
     else if (row.kind === "result") root.playSearchResult(root.pickingFor, row.item)
     else if (row.kind === "search") root.runSearch()
+    else if (row.kind === "browseService") root.browseInto(row.item.service, "root", row.item.service)
+    else if (row.kind === "container") root.browseInto(root.browseFrame.service,
+                                                      row.item.id, row.item.name)
+    else if (row.kind === "browseItem") root.playSearchResult(root.pickingFor, row.item)
+    else if (row.kind === "up") root.browseUp()
     // "note" is not actionable; selecting it and pressing Enter does nothing,
     // which is better than closing the picker on a row that said "Nothing
     // found".
@@ -193,6 +276,7 @@ BarWidget {
     root.pickingFor = room
     // One surface at a time; the rooms popup is where this was chosen from.
     root.popupOpen = false
+    root.clearBrowse()
     root.loadFavorites()
     root.loadBookmarks()
   }
@@ -201,6 +285,7 @@ BarWidget {
     root.pickingFor = ""
     root.filterText = ""
     root.clearSearch()
+    root.clearBrowse()
   }
 
   function clearSearch() {
@@ -294,13 +379,101 @@ BarWidget {
     searchProc.running = true
   }
 
+  // Its own Process again, for the reasons searchProc has one: browsing leaves
+  // the LAN, and a service that hangs must not reach anything the daemon does.
+  Process {
+    id: browseProc
+    onExited: function(code) {
+      if (code !== 0) {
+        // Gentle here, blunt in the CLI. A container that will not open leaves
+        // the path where it is, so "back" still works: the alternative is
+        // dropping someone out of a tree they were halfway down.
+        root.browseStatus = root.strings.browseError
+      }
+    }
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        // `[]` is an empty container, which is an answer; nothing at all is a
+        // failure and the exit code already said so.
+        if (!text || text.trim() === "") return
+        var parsed
+        try {
+          parsed = JSON.parse(text)
+        } catch (e) {
+          root.browseStatus = root.strings.browseError
+          return
+        }
+        if (!Array.isArray(parsed)) {
+          root.browseStatus = root.strings.browseError
+          return
+        }
+        root.browseItems = parsed
+        root.browseAnsweredFor = root.browseKey(root.browseFrame)
+        root.browseStatus = ""
+        root.selectedIndex = 0
+      }
+    }
+  }
+
+  /// Descend. The frame is pushed before the reply arrives so the path and the
+  /// back row are correct while it is still in flight.
+  function browseInto(service, id, title) {
+    if (!service || !id) return
+    var stack = root.browseStack.slice()
+    stack.push({ service: service, id: id, title: String(title || id) })
+    root.browseStack = stack
+    root.browseItems = []
+    root.browseAnsweredFor = ""
+    root.selectedIndex = 0
+    // The filter belonged to the list being left. Carrying it into a new
+    // container would hide most of it for a reason nobody could see.
+    root.filterText = ""
+    filterField.text = ""
+    root.fetchBrowse()
+  }
+
+  /// Back one level, and out to favorites from the top.
+  function browseUp() {
+    var stack = root.browseStack.slice()
+    stack.pop()
+    root.browseStack = stack
+    root.browseItems = []
+    root.browseAnsweredFor = ""
+    root.browseStatus = ""
+    root.selectedIndex = 0
+    root.filterText = ""
+    filterField.text = ""
+    if (stack.length > 0) root.fetchBrowse()
+  }
+
+  function fetchBrowse() {
+    var frame = root.browseFrame
+    if (!frame || browseProc.running) return
+    root.browseStatus = root.strings.browseLoading
+    browseProc.command = [root.command, "browse", "-s", frame.service,
+                          "--json", "--count", String(root.browseCount), frame.id]
+    browseProc.running = true
+  }
+
+  function clearBrowse() {
+    root.browseStack = []
+    root.browseItems = []
+    root.browseStatus = ""
+    root.browseAnsweredFor = ""
+  }
+
   // `play-item`, not `search --play N`: the widget already holds the id, and
   // re-running the search to find it again would cost a second round trip and
   // could land on a different hit if the service reordered.
   function playSearchResult(room, item) {
     if (!item || playFavoriteProc.running) return
     root.focusedName = room
-    playFavoriteProc.command = [root.command, "play-item", "-s", root.searchService,
+    // The item's own service, falling back to the configured one. A browse row
+    // can come from a service that is not `searchService`, and playing it as
+    // though it did would hand one service's id to another.
+    var service = String(item.service || root.searchService)
+    playFavoriteProc.command = [root.command, "play-item", "-s", service,
                                 String(item.id), "--title", String(item.name || ""),
                                 "-r", room]
     playFavoriteProc.running = true
@@ -800,6 +973,19 @@ BarWidget {
     queueEditProc.running = true
   }
 
+  /// A browse row's second line: its kind, and whatever the service offered as
+  /// a description. Not the service name - the title bar already says it.
+  function browseSubtitle(item) {
+    var parts = []
+    if (item.type) {
+      var raw = String(item.type)
+      var key = "kind" + raw.charAt(0).toUpperCase() + raw.slice(1).toLowerCase()
+      parts.push(root.strings[key] || raw.toLowerCase())
+    }
+    if (item.description) parts.push(String(item.description))
+    return parts.join(" · ")
+  }
+
   function favoriteSubtitle(favorite) {
     var parts = []
     if (favorite.type) {
@@ -829,7 +1015,20 @@ BarWidget {
     "repeat": "󰑖",
     "repeatOne": "󰑘",
     "shuffle": "󰒝",
-    "favorites": "󰓎",
+    // The button that opens the picker. Named `music` rather than `favorites`
+    // because the picker stopped being only favorites: it is the household's
+    // favorites, this machine's kept items, a service's own containers and a
+    // search, and a person pressing it is asking for music rather than for a
+    // list. `glyphs.favorites` still works - it is a documented setting and
+    // breaking it to rename a key would be a poor trade.
+    //
+    // U+266A, plain Unicode rather than a Nerd Font icon, so the button does
+    // not depend on a patched font. The trade is that JetBrainsMono Nerd Font
+    // has no U+266A of its own, so Qt falls back per-character to a font that
+    // does - Adwaita, Liberation and Nimbus all carry it - and the note may sit
+    // a shade lighter than the MDI glyphs beside it. Set `glyphs.music` to
+    // nf-md-music (U+F075A, two beamed quavers) for matching weight.
+    "music": "♪",
     "party": "◉",
     "group": "󰌷",
     "ungroup": "󰌸",
@@ -850,6 +1049,10 @@ BarWidget {
       for (var key in chosen)
         if (typeof chosen[key] === "string" && chosen[key].length > 0)
           merged[key] = chosen[key]
+    // The old name for `music`, honoured after the merge so that a shell.json
+    // written before the rename still gets the glyph it asked for.
+    if (chosen && typeof chosen["favorites"] === "string" && chosen["favorites"].length > 0)
+      merged["music"] = chosen["favorites"]
     return merged
   }
 
@@ -887,6 +1090,14 @@ BarWidget {
     "searching": "Searching…",
     "searchError": "Could not reach %1",
     "noResults": "Nothing found",
+    // Walking a service's own containers. %1 is a service name in `browseIn`
+    // and the place one level up in `up` - the parent container's name, or the
+    // service's own at the top of the tree.
+    "browseIn": "Browse %1",
+    "up": "← %1",
+    "browseLoading": "Opening…",
+    "browseError": "Could not open that",
+    "browseEmpty": "Nothing here",
     "nothingQueued": "Nothing queued",
     "queueError": "Could not read the queue",
     "playingTogether": "Playing together",
@@ -976,6 +1187,24 @@ BarWidget {
   readonly property string searchService: String(setting("searchService", "TuneIn") || "")
   readonly property bool searchEnabled: searchService !== ""
   readonly property int searchCount: Math.max(1, Number(setting("searchCount", 20)) || 20)
+
+  // Which services the picker offers to walk. A service's own containers - a
+  // personal library, a "For You", a genre tree - are the half of a linked
+  // account no search term can name, and there is no discovery UI for them:
+  // naming them here is the same bargain `searchService` already strikes.
+  // Defaults to whatever `searchService` is, so browsing appears without
+  // configuration and turns off with it.
+  readonly property var browseServices: {
+    var given = setting("browseServices", null)
+    if (Array.isArray(given)) {
+      var names = []
+      for (var i = 0; i < given.length; i++)
+        if (typeof given[i] === "string" && given[i] !== "") names.push(given[i])
+      return names
+    }
+    return root.searchService !== "" ? [root.searchService] : []
+  }
+  readonly property int browseCount: Math.max(1, Number(setting("browseCount", 100)) || 100)
 
   // The three steps down from the bar foreground, named once: a control the
   // source does not allow, one it allows but that is off, and secondary text.
@@ -1512,10 +1741,10 @@ BarWidget {
               }
 
               // Content, rather than transport: pick something for this room to
-              // play. The room is whichever row the star was on, so choosing
+              // play. The room is whichever row the note was on, so choosing
               // never involves choosing a room as well.
               Text {
-                text: root.glyphs.favorites
+                text: root.glyphs.music
                 color: root.bar.foreground
                 font.family: root.bar.fontFamily
                 font.pixelSize: Style.font.body
@@ -1603,7 +1832,15 @@ BarWidget {
         id: pickerTitle
         anchors.top: parent.top
         anchors.left: parent.left
-        text: root.pickingFor
+        anchors.right: pickerCount.left
+        anchors.rightMargin: Style.space(6)
+        elide: Text.ElideMiddle
+        // The room is whose picker this is and never leaves; the container is
+        // where in a service one currently stands. Eliding in the middle keeps
+        // both ends readable, which is what matters when the two are "Media
+        // Room" and a long station name.
+        text: root.browsing ? root.pickingFor + "  ·  " + root.browseFrame.title
+                            : root.pickingFor
         color: root.bar.foreground
         font.family: root.bar.fontFamily
         font.pixelSize: Style.font.body
@@ -1614,13 +1851,22 @@ BarWidget {
         id: pickerCount
         anchors.verticalCenter: pickerTitle.verticalCenter
         anchors.right: parent.right
-        visible: root.favoritesLoaded || root.bookmarksLoaded || root.searchStatus !== ""
+        visible: root.favoritesLoaded || root.bookmarksLoaded
+                 || root.searchStatus !== "" || root.browsing
         // The status goes here rather than over the list: a search that is
         // running, or that failed, must not take away the rows already shown.
         // The favorites status joins it whenever the list is up, so a failed
         // favorites load is still reported instead of being swallowed by the
         // rows that survived it.
         text: {
+          // Inside a container, everything on screen belongs to that container,
+          // so the count is about it and nothing else.
+          if (root.browsing) {
+            if (root.browseStatus !== "") return root.browseStatus
+            var here = root.shownBrowseItems.length
+            return here + (root.filterText !== ""
+                           ? " " + root.strings.of + " " + root.browseItems.length : "")
+          }
           if (root.searchStatus !== "") return root.searchStatus
           if (root.favoritesStatus !== "" && root.pickerRows.length > 0)
             return root.favoritesStatus
@@ -1659,6 +1905,11 @@ BarWidget {
           var items = root.pickerRows
           if (event.key === Qt.Key_Escape) {
             root.closePicker()
+          } else if ((event.key === Qt.Key_Backspace || event.key === Qt.Key_Left)
+                     && root.browsing && text === "") {
+            // Only on an empty field. Both keys mean something to a text cursor,
+            // and a filter someone is still editing outranks navigation.
+            root.browseUp()
           } else if (event.key === Qt.Key_Down) {
             root.selectedIndex = Math.min(root.selectedIndex + 1, Math.max(0, items.length - 1))
           } else if (event.key === Qt.Key_Up) {
@@ -1680,7 +1931,9 @@ BarWidget {
         // favoritesStatus is permanently set, and keying off it hid the search
         // row along with the empty list it was describing. Whatever the status
         // has to say is still said, in the count line, where it costs no rows.
-        visible: root.pickerRows.length === 0
+        // Never while browsing: the back row means pickerRows is never empty
+        // there, and a container's own emptiness is said in a note row instead.
+        visible: !root.browsing && root.pickerRows.length === 0
                  && (root.favoritesLoaded || root.bookmarksLoaded
                      || root.favoritesStatus !== "")
         text: root.favoritesStatus !== "" ? root.favoritesStatus : root.strings.noMatch
@@ -1751,20 +2004,39 @@ BarWidget {
             anchors.left: parent.left
             anchors.leftMargin: Style.space(6)
             size: Style.space(root.pickerArtSize)
-            // The search action and the empty-result note carry no art, and a
+            // The action rows and the empty-result note carry no art, and a
             // placeholder speaker beside them would read as a thing to play.
+            // A container often does have art - services give their own
+            // sections icons - so it keeps its tile.
             visible: root.showArt && entry.kind !== "search" && entry.kind !== "note"
+                     && entry.kind !== "browseService" && entry.kind !== "up"
             url: entry.payload.art_url || ""
             placeholder: root.glyphs.speaker
             foreground: root.bar.foreground
             fontFamily: root.bar.fontFamily
           }
 
+          // Somewhere to go rather than something to play, said once at the
+          // end of the row. The distinction is not decorative: a service can
+          // mark a container playable and still refuse its id, so the widget
+          // must never offer one as a track.
+          Text {
+            id: entryInto
+            anchors.verticalCenter: parent.verticalCenter
+            anchors.right: parent.right
+            anchors.rightMargin: Style.space(8)
+            visible: entry.kind === "container" || entry.kind === "browseService"
+            text: "›"
+            color: root.secondaryFg
+            font.family: root.bar.fontFamily
+            font.pixelSize: Style.font.body
+          }
+
           Column {
             id: entryText
             anchors.verticalCenter: parent.verticalCenter
             anchors.left: entryArt.visible ? entryArt.right : parent.left
-            anchors.right: parent.right
+            anchors.right: entryInto.visible ? entryInto.left : parent.right
             anchors.leftMargin: Style.space(6)
             anchors.rightMargin: Style.space(8)
             spacing: Style.space(1)
@@ -1783,7 +2055,12 @@ BarWidget {
             Text {
               width: parent.width
               visible: text !== ""
-              text: entry.actionable ? root.favoriteSubtitle(entry.payload) : ""
+              // Inside a container the service is already in the title, so the
+              // second line is the kind alone rather than "stream · iHeartRadio"
+              // on every one of fifty rows.
+              text: !entry.actionable ? ""
+                    : root.browsing ? root.browseSubtitle(entry.payload)
+                    : root.favoriteSubtitle(entry.payload)
               color: root.secondaryFg
               font.family: root.bar.fontFamily
               font.pixelSize: Style.font.caption

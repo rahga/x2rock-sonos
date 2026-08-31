@@ -1,7 +1,7 @@
 # x2rock.sonos — Omarchy bar widget
 
 Sonos rooms in the bar: now-playing, transport, per-room volume, favorites,
-grouping and party mode. Driven entirely by the `x2rock daemon`'s MPRIS players.
+browsing and searching a music service, grouping and party mode. Driven entirely by the `x2rock daemon`'s MPRIS players.
 
 Needs `x2rock` on `PATH` and `x2rock daemon` running. With no daemon there are
 no players, and the widget hides itself.
@@ -24,8 +24,10 @@ the plugin is installed by copying over the previous copy, so changes to
   "panelWidth": 380,
   "highlight": 0.12,
   "command": "x2rock",
+  "searchService": "TuneIn",
+  "browseServices": ["iHeartRadio", "Bandcamp"],
   "glyphs": {
-    "favorites": "󰋑"
+    "music": "󰝚"
   },
   "strings": {
     "playing": "spiller",
@@ -41,11 +43,15 @@ the plugin is installed by copying over the previous copy, so changes to
 | `showState` | `true` | The `playing` / `paused` word beside each room name. |
 | `showMembers` | `true` | The `Kitchen + Guest TV` line under a grouped room. Never shown for an ungrouped one. |
 | `popupWidth` | `340` | Width of the room list, in the widget's own spacing units. Clamped to what the screen allows. |
-| `panelWidth` | `380` | Width of the favorites, queue and grouping panels. Same units, same clamp. |
+| `panelWidth` | `380` | Width of the music, queue and grouping panels. Same units, same clamp. |
 | `highlight` | the shell's own | How strongly a row lights up under the cursor, as an opacity over the theme's cursor colour - which follows the accent, like every first-party row. Unset it and the widget lights up exactly as the rest of the shell does; set a number to diverge, or `0` to turn cursor highlighting off. The playing track in a queue keeps its own mark either way. |
 | `command` | `"x2rock"` | The x2rock binary. A bare name is looked up on the shell's `PATH`, which is not the same `PATH` an interactive terminal has — give an absolute path if the widget can read rooms but its buttons do nothing. |
 | `strings` | see below | Per-word overrides, for a household that is not English or one that just wants shorter labels. Each key falls back on its own. |
 | `glyphs` | see below | Per-glyph overrides. Each key falls back on its own, so overriding one does not mean restating the rest. |
+| `searchService` | `"TuneIn"` | Which service the picker's **Search** row queries. `""` turns searching off entirely. Only services x2rock can reach are valid — `x2rock search` lists them, and `x2rock link` adds to that list. |
+| `searchCount` | `20` | Hits fetched per search. Minimum 1. |
+| `browseServices` | whatever `searchService` is | Which services the picker offers to **walk**, as an array of names. A service's own containers — a personal library, a "For You", a genre tree — are the half of a service no search term can name. `[]` turns browsing off; unset, one row appears for `searchService`, so browsing works without configuration. |
+| `browseCount` | `100` | Rows fetched per container. Minimum 1. |
 
 ### Glyphs
 
@@ -62,7 +68,7 @@ which is an ordinary Unicode character. Override any subset:
 | `repeat` | `󰑖` | Room row, off or repeating the queue |
 | `repeatOne` | `󰑘` | Room row, repeating one track |
 | `shuffle` | `󰒝` | Room row |
-| `favorites` | `󰓎` | Opens that room's favorites picker |
+| `music` | `♪` | Opens that room's music picker — favorites, kept items, browsing and search |
 | `group` | `󰌷` | Opens that room's grouping panel |
 | `ungroup` | `󰌸` | Sends one room back out on its own |
 | `tv` | `󰠹` | Switches a soundbar to its TV input, and stands in for cover art while it is on TV |
@@ -72,7 +78,17 @@ which is an ordinary Unicode character. Override any subset:
 | `moveDown` | `󰅀` | Move a queue track later |
 | `party` | `◉` | Party mode, hosted by that room. Plain Unicode, not a Nerd Font icon, so it draws in almost any font |
 
-Anything the bar's font can draw works, including plain text — `"favorites":
+`music` and `party` are plain Unicode rather than Nerd Font icons, so they draw
+without a patched font. The trade for `music` is that JetBrainsMono Nerd Font has
+no `♪` of its own, so Qt falls back per-character to a font that does — Adwaita,
+Liberation and Nimbus all carry it — and the note can sit a shade lighter than
+the icons beside it. `"music": "󰝚"` (nf-md-music, two beamed quavers) is the
+matching-weight version.
+
+`music` was called `favorites` before the picker grew browsing and search, and
+that name still works: a `shell.json` written against it needs no editing.
+
+Anything the bar's font can draw works, including plain text — `"music":
 "fav"` is valid. If a glyph comes out as a box, the font lacks that codepoint;
 `fc-list ":charset=<hex>"` lists the fonts that have it.
 
@@ -82,8 +98,15 @@ Anything the bar's font can draw works, including plain text — `"favorites":
 |---|---|
 | `playing` / `paused` | `playing` / `paused` — beside each room name |
 | `loading` | `Loading…` |
-| `filterHint` | `Type to filter` — the favorites filter placeholder |
+| `filterHint` | `Type to filter` — the picker's filter placeholder. Filters favorites and kept items, and whatever container is open |
 | `noMatch` | `No match` |
+| `searchFor` | `Search %1` — the row that runs a query. `%1` is the service |
+| `searching` / `searchError` | `Searching…` / `Could not reach %1` |
+| `noResults` | `Nothing found` |
+| `browseIn` | `Browse %1` — the row that opens a service's own containers. `%1` is the service |
+| `up` | `← %1` — the row back out of a container. `%1` is where it goes: the parent's name, or the service's own at the top of the tree |
+| `browseLoading` / `browseError` | `Opening…` / `Could not open that` |
+| `browseEmpty` | `Nothing here` — a container the service says is empty |
 | `noFavorites` / `favoritesError` | `No favorites saved` / `Could not read favorites` |
 | `nothingQueued` / `queueError` | `Nothing queued` / `Could not read the queue` |
 | `playingTogether` | `Playing together` — heading over a group's members |
@@ -145,7 +168,7 @@ along a row of ten:
 | `n` / `p` | Next or previous track, where the source allows it. |
 | `r` | Repeat: off → all → one → off, skipping what the source cannot do. |
 | `s` | Shuffle. |
-| `f` | Favorites picker for that room. |
+| `f` | Music picker for that room: favorites, kept items, browsing and search. |
 | `q` | Its queue. |
 | `g` | Its grouping panel. |
 | `t` | Switch it to TV input, on a soundbar that has one. |
@@ -163,7 +186,7 @@ it there, so there is one of them rather than one per input device:
 
 | Panel | `Enter` on the cursor | Also |
 |---|---|---|
-| Favorites | Plays that favorite in the room | Type to filter the list |
+| Music | Plays the row in the room, or opens it when it is a container | Type to filter. `Backspace` or `←` on an empty filter goes back up a container |
 | Queue | Jumps to that track | The cursor starts on the playing track |
 | Grouping | Leaves the group, on a member; joins it, on a room outside | `←` / `→` set the selected member's own volume, not the group's |
 
