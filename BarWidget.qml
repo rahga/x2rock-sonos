@@ -1022,13 +1022,18 @@ BarWidget {
     // list. `glyphs.favorites` still works - it is a documented setting and
     // breaking it to rename a key would be a poor trade.
     //
-    // U+266A, plain Unicode rather than a Nerd Font icon, so the button does
-    // not depend on a patched font. The trade is that JetBrainsMono Nerd Font
-    // has no U+266A of its own, so Qt falls back per-character to a font that
-    // does - Adwaita, Liberation and Nimbus all carry it - and the note may sit
-    // a shade lighter than the MDI glyphs beside it. Set `glyphs.music` to
-    // nf-md-music (U+F075A, two beamed quavers) for matching weight.
-    "music": "♪",
+    // nf-md-music (U+F075A): two beamed quavers, from the same Material Design
+    // set as every other glyph here. Plain `♪` (U+266A) was tried first, to
+    // avoid depending on a patched font - but the dependency was already there,
+    // since sixteen of the seventeen glyphs below are Nerd Font icons and the
+    // widget draws boxes without one. Avoiding it for this one button bought
+    // nothing and cost a per-character font fallback, because JetBrainsMono
+    // Nerd Font has no U+266A: the note came from Adwaita or Liberation
+    // instead, at a different weight from its neighbours.
+    //
+    // `♪` remains the right answer for a bar whose font is *not* patched, which
+    // is what `glyphs.music` is for.
+    "music": "󰝚",
     "party": "◉",
     "group": "󰌷",
     "ungroup": "󰌸",

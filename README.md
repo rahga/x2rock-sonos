@@ -68,7 +68,7 @@ which is an ordinary Unicode character. Override any subset:
 | `repeat` | `󰑖` | Room row, off or repeating the queue |
 | `repeatOne` | `󰑘` | Room row, repeating one track |
 | `shuffle` | `󰒝` | Room row |
-| `music` | `♪` | Opens that room's music picker — favorites, kept items, browsing and search |
+| `music` | `󰝚` | Opens that room's music picker — favorites, kept items, browsing and search |
 | `group` | `󰌷` | Opens that room's grouping panel |
 | `ungroup` | `󰌸` | Sends one room back out on its own |
 | `tv` | `󰠹` | Switches a soundbar to its TV input, and stands in for cover art while it is on TV |
@@ -78,12 +78,10 @@ which is an ordinary Unicode character. Override any subset:
 | `moveDown` | `󰅀` | Move a queue track later |
 | `party` | `◉` | Party mode, hosted by that room. Plain Unicode, not a Nerd Font icon, so it draws in almost any font |
 
-`music` and `party` are plain Unicode rather than Nerd Font icons, so they draw
-without a patched font. The trade for `music` is that JetBrainsMono Nerd Font has
-no `♪` of its own, so Qt falls back per-character to a font that does — Adwaita,
-Liberation and Nimbus all carry it — and the note can sit a shade lighter than
-the icons beside it. `"music": "󰝚"` (nf-md-music, two beamed quavers) is the
-matching-weight version.
+`party` is the one plain-Unicode default, and draws in almost any font. If your
+bar's font is **not** a patched Nerd Font every other glyph here comes out as a
+box, and plain characters are the fix — `"music": "♪"` (U+266A) is the note for
+that case.
 
 `music` was called `favorites` before the picker grew browsing and search, and
 that name still works: a `shell.json` written against it needs no editing.
