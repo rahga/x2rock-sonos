@@ -72,6 +72,21 @@ BarWidget {
   property string filterText: ""
   property int selectedIndex: 0
 
+  // Searching a music service, which is the one thing here that leaves the LAN
+  // - and it does so in a Process of its own, never in the daemon, so a slow or
+  // unreachable service cannot delay a single control. See "Rule: search never
+  // enters the daemon" in docs/architecture.md.
+  property var searchResults: []
+  property string searchStatus: ""
+  /// The term `searchResults` are answers to. Results are only shown while the
+  /// typed text still matches it, so editing the query cannot leave stale hits
+  /// sitting under a different word.
+  property string searchedTerm: ""
+  /// The term in flight, kept because the field can be edited while the
+  /// subprocess runs and the reply belongs to what was asked, not to what is
+  /// typed now.
+  property string pendingTerm: ""
+
   // Name or service, so "sonos" finds the radio stations and "bed" finds the
   // bedtime mixes. There are dozens of these; scrolling to one is the fallback,
   // not the plan.
@@ -89,6 +104,47 @@ BarWidget {
     return found
   }
 
+  // Favorites and search hits in one list, because they answer the same
+  // question - what should this room play - and a person filtering for
+  // something they own should not have to decide in advance whether they own
+  // it. The CLI emits both with the same field names, so this is a
+  // concatenation rather than a translation.
+  //
+  // The search row is an *action*, not a result: nothing is sent until it is
+  // chosen. Searching on every keystroke would put a network round trip behind
+  // typing, which is the behaviour this widget exists to avoid.
+  readonly property var pickerRows: {
+    var rows = []
+    var favs = shownFavorites
+    for (var i = 0; i < favs.length; i++) rows.push({ kind: "favorite", item: favs[i] })
+
+    var term = filterText.trim()
+    if (!searchEnabled || term === "") return rows
+
+    if (searchedTerm === term) {
+      var hits = searchResults
+      for (var j = 0; j < hits.length; j++) rows.push({ kind: "result", item: hits[j] })
+      if (hits.length === 0)
+        rows.push({ kind: "note", item: { name: strings.noResults, type: "", art_url: "" } })
+    } else {
+      rows.push({
+        kind: "search",
+        item: { name: strings.searchFor.arg(searchService), type: "", art_url: "" }
+      })
+    }
+    return rows
+  }
+
+  function activateRow(row) {
+    if (!row) return
+    if (row.kind === "favorite") root.playFavorite(root.pickingFor, row.item)
+    else if (row.kind === "result") root.playSearchResult(root.pickingFor, row.item)
+    else if (row.kind === "search") root.runSearch()
+    // "note" is not actionable; selecting it and pressing Enter does nothing,
+    // which is better than closing the picker on a row that said "Nothing
+    // found".
+  }
+
   // The picker dismisses itself, rather than the widget: see close() above.
   QtObject {
     id: pickerOwner
@@ -104,6 +160,7 @@ BarWidget {
     root.focusedName = room
     root.filterText = ""
     root.selectedIndex = 0
+    root.clearSearch()
     filterField.text = ""
     root.pickingFor = room
     // One surface at a time; the rooms popup is where this was chosen from.
@@ -114,6 +171,14 @@ BarWidget {
   function closePicker() {
     root.pickingFor = ""
     root.filterText = ""
+    root.clearSearch()
+  }
+
+  function clearSearch() {
+    root.searchResults = []
+    root.searchStatus = ""
+    root.searchedTerm = ""
+    root.pendingTerm = ""
   }
 
   Process {
@@ -146,6 +211,72 @@ BarWidget {
         root.favoritesStatus = parsed.length > 0 ? "" : root.strings.noFavorites
       }
     }
+  }
+
+  // Its own Process, deliberately. A hung or failed search is confined to this
+  // object: rooms, transport and volume all come from MPRIS and never wait on
+  // it. The failure handling copies favoritesProc's, and for the same reasons.
+  Process {
+    id: searchProc
+    onExited: function(code) {
+      if (code !== 0) {
+        // Blunt from the CLI, gentle here: the results already on screen stay,
+        // and the failure is one line rather than an empty list.
+        root.searchStatus = root.strings.searchError.arg(root.searchService)
+        root.pendingTerm = ""
+      }
+    }
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        // Nothing at all is a failure and the exit code says so; `[]` is a real
+        // answer meaning the service has nothing. Reading the first as the
+        // second would replace an error with a wrong result.
+        if (!text || text.trim() === "") return
+        var parsed
+        try {
+          parsed = JSON.parse(text)
+        } catch (e) {
+          root.searchStatus = root.strings.searchError.arg(root.searchService)
+          return
+        }
+        if (!Array.isArray(parsed)) {
+          root.searchStatus = root.strings.searchError.arg(root.searchService)
+          return
+        }
+        root.searchResults = parsed
+        // The reply answers what was asked, which may no longer be what is
+        // typed. Binding to pendingTerm rather than to the field is what keeps
+        // a slow answer from appearing under a query nobody made.
+        root.searchedTerm = root.pendingTerm
+        root.searchStatus = ""
+        root.selectedIndex = 0
+      }
+    }
+  }
+
+  function runSearch() {
+    var term = root.filterText.trim()
+    if (term === "" || !root.searchEnabled || searchProc.running) return
+    root.pendingTerm = term
+    root.searchStatus = root.strings.searching
+    searchProc.command = [root.command, "search", "-s", root.searchService,
+                          "--json", "--count", String(root.searchCount), term]
+    searchProc.running = true
+  }
+
+  // `play-item`, not `search --play N`: the widget already holds the id, and
+  // re-running the search to find it again would cost a second round trip and
+  // could land on a different hit if the service reordered.
+  function playSearchResult(room, item) {
+    if (!item || playFavoriteProc.running) return
+    root.focusedName = room
+    playFavoriteProc.command = [root.command, "play-item", "-s", root.searchService,
+                                String(item.id), "--title", String(item.name || ""),
+                                "-r", room]
+    playFavoriteProc.running = true
+    root.closePicker()
+    root.backToRooms()
   }
 
   Process { id: playFavoriteProc }
@@ -662,6 +793,12 @@ BarWidget {
     "noMatch": "No match",
     "noFavorites": "No favorites saved",
     "favoritesError": "Could not read favorites",
+    // Searching a music service. %1 is the service's name, so a household that
+    // points `searchService` somewhere else gets sentences that still read.
+    "searchFor": "Search %1",
+    "searching": "Searching…",
+    "searchError": "Could not reach %1",
+    "noResults": "Nothing found",
     "nothingQueued": "Nothing queued",
     "queueError": "Could not read the queue",
     "playingTogether": "Playing together",
@@ -743,6 +880,14 @@ BarWidget {
   // bar is themed tightly enough that album covers are an intrusion. Never on
   // the pill itself, which is always on screen - see CoverArt.qml.
   readonly property bool showArt: setting("art", true) !== false
+
+  // Which service the picker searches, and how many hits to ask for. Only
+  // services with anonymous access can be searched at all - the CLI says so
+  // plainly if this names one that cannot. Set it to "" to leave the picker
+  // exactly as it was, with no network call behind it.
+  readonly property string searchService: String(setting("searchService", "TuneIn") || "")
+  readonly property bool searchEnabled: searchService !== ""
+  readonly property int searchCount: Math.max(1, Number(setting("searchCount", 20)) || 20)
 
   // The three steps down from the bar foreground, named once: a control the
   // source does not allow, one it allows but that is off, and secondary text.
@@ -1381,8 +1526,12 @@ BarWidget {
         id: pickerCount
         anchors.verticalCenter: pickerTitle.verticalCenter
         anchors.right: parent.right
-        visible: root.favoritesLoaded
-        text: root.shownFavorites.length + (root.filterText !== "" ? " " + root.strings.of + " " + root.favorites.length : "")
+        visible: root.favoritesLoaded || root.searchStatus !== ""
+        // The status goes here rather than over the list: a search that is
+        // running, or that failed, must not take away the rows already shown.
+        text: root.searchStatus !== ""
+          ? root.searchStatus
+          : root.shownFavorites.length + (root.filterText !== "" ? " " + root.strings.of + " " + root.favorites.length : "")
         color: root.secondaryFg
         font.family: root.bar.fontFamily
         font.pixelSize: Style.font.caption
@@ -1402,13 +1551,16 @@ BarWidget {
           root.filterText = text
           // The old position means nothing once the list is a different list.
           root.selectedIndex = 0
+          // A stale "could not reach" under a query nobody has run yet reads as
+          // if the new text had already failed.
+          if (root.searchStatus !== "" && !searchProc.running) root.searchStatus = ""
         }
 
         // Arrows and Enter drive the list while the text keeps arriving here.
         // PanelKeyCatcher is deliberately not used: it claims h/j/k/l/x and
         // space as navigation, which a typed name cannot survive.
         Keys.onPressed: function(event) {
-          var items = root.shownFavorites
+          var items = root.pickerRows
           if (event.key === Qt.Key_Escape) {
             root.closePicker()
           } else if (event.key === Qt.Key_Down) {
@@ -1417,7 +1569,7 @@ BarWidget {
             root.selectedIndex = Math.max(root.selectedIndex - 1, 0)
           } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
             if (items.length > 0)
-              root.playFavorite(root.pickingFor, items[root.selectedIndex])
+              root.activateRow(items[root.selectedIndex])
           } else {
             return
           }
@@ -1427,7 +1579,10 @@ BarWidget {
 
       Text {
         id: pickerStatus
-        visible: root.favoritesStatus !== "" || (root.favoritesLoaded && root.shownFavorites.length === 0)
+        // Only when there is genuinely nothing to show. With search on there is
+        // almost always a row - the search action itself - so this now speaks
+        // for a failed favorites load rather than for an empty filter.
+        visible: root.favoritesStatus !== "" || (root.favoritesLoaded && root.pickerRows.length === 0)
         text: root.favoritesStatus !== "" ? root.favoritesStatus : root.strings.noMatch
         color: root.secondaryFg
         font.family: root.bar.fontFamily
@@ -1446,7 +1601,7 @@ BarWidget {
         anchors.bottom: parent.bottom
         visible: !pickerStatus.visible
         clip: true
-        model: root.shownFavorites
+        model: root.pickerRows
         boundsBehavior: Flickable.StopAtBounds
         currentIndex: root.selectedIndex
         // Keep the keyboard selection in view when it walks off the edge.
@@ -1456,12 +1611,21 @@ BarWidget {
           id: entry
           required property var modelData
           required property int index
+
+          /// The row's payload, shaped the same whether it came from favorites
+          /// or from a service - which is why the CLI emits both with the same
+          /// field names.
+          readonly property var payload: entry.modelData.item
+          readonly property string kind: entry.modelData.kind
+          /// A note is a sentence, not a thing to play.
+          readonly property bool actionable: entry.kind !== "note"
+
           width: ListView.view.width
           height: Math.max(entryText.implicitHeight, root.showArt ? entryArt.size : 0)
                   + Style.space(10)
           hoverEnabled: true
-          cursorShape: Qt.PointingHandCursor
-          onClicked: root.playFavorite(root.pickingFor, entry.modelData)
+          cursorShape: entry.actionable ? Qt.PointingHandCursor : Qt.ArrowCursor
+          onClicked: root.activateRow(entry.modelData)
           // Hovering moves the keyboard selection too, so the two never
           // disagree about which row Enter would play.
           onEntered: root.selectedIndex = entry.index
@@ -1483,12 +1647,14 @@ BarWidget {
           // scrolling fetches as it goes rather than all of them at once.
           CoverArt {
             id: entryArt
-            visible: root.showArt
             anchors.verticalCenter: parent.verticalCenter
             anchors.left: parent.left
             anchors.leftMargin: Style.space(6)
             size: Style.space(root.pickerArtSize)
-            url: entry.modelData.art_url || ""
+            // The search action and the empty-result note carry no art, and a
+            // placeholder speaker beside them would read as a thing to play.
+            visible: root.showArt && entry.kind !== "search" && entry.kind !== "note"
+            url: entry.payload.art_url || ""
             placeholder: root.glyphs.speaker
             foreground: root.bar.foreground
             fontFamily: root.bar.fontFamily
@@ -1505,8 +1671,10 @@ BarWidget {
 
             Text {
               width: parent.width
-              text: entry.modelData.name || ""
-              color: root.bar.foreground
+              text: entry.payload.name || ""
+              // A note is not an offer, so it does not get the foreground the
+              // playable rows have.
+              color: entry.actionable ? root.bar.foreground : root.secondaryFg
               font.family: root.bar.fontFamily
               font.pixelSize: Style.font.body
               elide: Text.ElideRight
@@ -1515,7 +1683,7 @@ BarWidget {
             Text {
               width: parent.width
               visible: text !== ""
-              text: root.favoriteSubtitle(entry.modelData)
+              text: entry.actionable ? root.favoriteSubtitle(entry.payload) : ""
               color: root.secondaryFg
               font.family: root.bar.fontFamily
               font.pixelSize: Style.font.caption
