@@ -63,6 +63,13 @@ BarWidget {
   property var favorites: []
   property bool favoritesLoaded: false
   property string favoritesStatus: ""
+
+  // x2rock's own saved items, as distinct from the household's favorites: an
+  // id kept from something that played once, so it can be started again without
+  // the service search that most services will not allow. Same JSON shape as
+  // favorites, deliberately, so the picker concatenates rather than translates.
+  property var bookmarks: []
+  property bool bookmarksLoaded: false
   /// The queue panel's cursor, over the rows as listed. -1 until the first
   /// list arrives and puts it on whatever is playing.
   property int queueIndex: -1
@@ -117,6 +124,10 @@ BarWidget {
     var rows = []
     var favs = shownFavorites
     for (var i = 0; i < favs.length; i++) rows.push({ kind: "favorite", item: favs[i] })
+    // After the household's own, because favorites are what a household shares
+    // and these are what this machine happens to remember.
+    var kept = shownBookmarks
+    for (var k = 0; k < kept.length; k++) rows.push({ kind: "bookmark", item: kept[k] })
 
     var term = filterText.trim()
     if (!searchEnabled || term === "") return rows
@@ -138,11 +149,28 @@ BarWidget {
   function activateRow(row) {
     if (!row) return
     if (row.kind === "favorite") root.playFavorite(root.pickingFor, row.item)
+    else if (row.kind === "bookmark") root.playBookmark(root.pickingFor, row.item)
     else if (row.kind === "result") root.playSearchResult(root.pickingFor, row.item)
     else if (row.kind === "search") root.runSearch()
     // "note" is not actionable; selecting it and pressing Enter does nothing,
     // which is better than closing the picker on a row that said "Nothing
     // found".
+  }
+
+  readonly property var shownBookmarks: {
+    var needle = filterText.toLowerCase().trim()
+    if (needle === "") return bookmarks
+    var found = []
+    for (var i = 0; i < bookmarks.length; i++) {
+      var b = bookmarks[i]
+      var name = String(b.name || "").toLowerCase()
+      var service = String(b.service || "").toLowerCase()
+      var by = String(b.description || "").toLowerCase()
+      if (name.indexOf(needle) !== -1 || service.indexOf(needle) !== -1
+          || by.indexOf(needle) !== -1)
+        found.push(b)
+    }
+    return found
   }
 
   // The picker dismisses itself, rather than the widget: see close() above.
@@ -166,6 +194,7 @@ BarWidget {
     // One surface at a time; the rooms popup is where this was chosen from.
     root.popupOpen = false
     root.loadFavorites()
+    root.loadBookmarks()
   }
 
   function closePicker() {
@@ -274,6 +303,65 @@ BarWidget {
     playFavoriteProc.command = [root.command, "play-item", "-s", root.searchService,
                                 String(item.id), "--title", String(item.name || ""),
                                 "-r", room]
+    playFavoriteProc.running = true
+    root.closePicker()
+    root.backToRooms()
+  }
+
+  // Only worth offering when there is a title to hang a name on. The CLI
+  // refuses a live stream with no id of its own, and a button that always looks
+  // available and sometimes silently does nothing is worse than a dim one.
+  function canKeep(player) {
+    return !!(player && player.trackTitle)
+  }
+
+  Process {
+    id: keepProc
+    // Re-read afterwards so a kept item shows in the picker immediately rather
+    // than at the next open.
+    onExited: root.loadBookmarks()
+  }
+
+  function keepPlaying(room) {
+    if (keepProc.running) return
+    keepProc.command = [root.command, "keep", "-r", room]
+    keepProc.running = true
+  }
+
+  Process {
+    id: bookmarksProc
+    command: [root.command, "bookmarks", "--json"]
+    onExited: function(code) {
+      // Quieter than favorites on purpose: an empty bookmark list is the normal
+      // state until someone keeps something, so a failure here says nothing and
+      // simply leaves the section absent rather than claiming an error.
+      if (code === 0) root.bookmarksLoaded = true
+    }
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        if (!text || text.trim() === "") return
+        try {
+          var parsed = JSON.parse(text)
+          if (Array.isArray(parsed)) root.bookmarks = parsed
+        } catch (e) {
+          // Leave whatever was already listed; see the favorites picker.
+        }
+      }
+    }
+  }
+
+  function loadBookmarks() {
+    if (bookmarksProc.running) return
+    bookmarksProc.running = true
+  }
+
+  // By name, which is what `bookmark` matches on, and which is unique enough:
+  // keeping the same object twice replaces rather than duplicates.
+  function playBookmark(room, item) {
+    if (!item || playFavoriteProc.running) return
+    root.focusedName = room
+    playFavoriteProc.command = [root.command, "bookmark", String(item.name || ""), "-r", room]
     playFavoriteProc.running = true
     root.closePicker()
     root.backToRooms()
@@ -791,7 +879,7 @@ BarWidget {
     "loading": "Loading…",
     "filterHint": "Type to filter",
     "noMatch": "No match",
-    "noFavorites": "No favorites saved",
+    "noFavorites": "Nothing saved yet",
     "favoritesError": "Could not read favorites",
     // Searching a music service. %1 is the service's name, so a household that
     // points `searchService` somewhere else gets sentences that still read.
@@ -1526,7 +1614,7 @@ BarWidget {
         id: pickerCount
         anchors.verticalCenter: pickerTitle.verticalCenter
         anchors.right: parent.right
-        visible: root.favoritesLoaded || root.searchStatus !== ""
+        visible: root.favoritesLoaded || root.bookmarksLoaded || root.searchStatus !== ""
         // The status goes here rather than over the list: a search that is
         // running, or that failed, must not take away the rows already shown.
         // The favorites status joins it whenever the list is up, so a failed
@@ -1536,8 +1624,9 @@ BarWidget {
           if (root.searchStatus !== "") return root.searchStatus
           if (root.favoritesStatus !== "" && root.pickerRows.length > 0)
             return root.favoritesStatus
-          return root.shownFavorites.length
-            + (root.filterText !== "" ? " " + root.strings.of + " " + root.favorites.length : "")
+          var shown = root.shownFavorites.length + root.shownBookmarks.length
+          var total = root.favorites.length + root.bookmarks.length
+          return shown + (root.filterText !== "" ? " " + root.strings.of + " " + total : "")
         }
         color: root.secondaryFg
         font.family: root.bar.fontFamily
@@ -1592,7 +1681,8 @@ BarWidget {
         // row along with the empty list it was describing. Whatever the status
         // has to say is still said, in the count line, where it costs no rows.
         visible: root.pickerRows.length === 0
-                 && (root.favoritesLoaded || root.favoritesStatus !== "")
+                 && (root.favoritesLoaded || root.bookmarksLoaded
+                     || root.favoritesStatus !== "")
         text: root.favoritesStatus !== "" ? root.favoritesStatus : root.strings.noMatch
         color: root.secondaryFg
         font.family: root.bar.fontFamily
