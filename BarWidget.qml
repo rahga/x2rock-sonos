@@ -677,10 +677,12 @@ BarWidget {
     return String(name || "")
   }
 
-  /// The same question asked of a picker row, which cannot be asked the same
-  /// way: the daemon's flag describes what is *playing*, and a row is a thing
-  /// that is not. The three sources share field names but not vocabularies,
-  /// because each passes through what its own origin called the item:
+  /// Which mark a picker row earns, or "" for the rows that earn none.
+  ///
+  /// This cannot ask the question the room row asks: the daemon's flag
+  /// describes what is *playing*, and a row is a thing that is not. The three
+  /// sources share field names but not vocabularies, because each passes
+  /// through what its own origin called the item:
   ///
   /// - `search` and `browse` carry SMAPI's `itemType`, where a station is
   ///   `stream`. Verified against TuneIn on 2026-09-01.
@@ -695,11 +697,22 @@ BarWidget {
   /// - `bookmarks` carries whatever x2rock stored, which is `stream` for a kept
   ///   station and so needs nothing of its own.
   ///
-  /// Unknown reads as "no": an unmarked station is a smaller wrong than a
-  /// marked album.
-  function isStreamRow(item) {
+  /// A podcast *show* is `show`, and gets the microphone. Its episodes are
+  /// typed `track` - identical to a song, with nothing on the row telling them
+  /// apart - so the show is the only honest place to mark. It is also the row
+  /// someone actually chooses from; the episodes below inherit the context by
+  /// being where you already are.
+  ///
+  /// Unknown reads as "": an unmarked station is a smaller wrong than a marked
+  /// album, and a service typing things this file has never seen gets no mark
+  /// rather than a guessed one.
+  function markFor(item) {
     var kind = String((item && item.type) || "").toLowerCase()
-    return kind === "stream" || kind.indexOf("audiobroadcast") !== -1
+    if (kind === "stream" || kind.indexOf("audiobroadcast") !== -1)
+      return root.glyphs.radio
+    if (kind === "show")
+      return root.glyphs.podcast
+    return ""
   }
 
   Process { id: tvProc }
@@ -1168,6 +1181,13 @@ BarWidget {
     // be paused - see `stopRather` for which ones do and why it is not a
     // second button.
     "stop": "󰓛",
+    // A microphone (nf-md-microphone, U+F036C) rather than the podcast icon
+    // proper (nf-fa-podcast, U+F2CE), for two reasons. The podcast icon is
+    // concentric waves and reads almost identically to `radio` at caption
+    // size, and the two mark rows that sit beside each other in one list.
+    // It is also Font Awesome where every other glyph here is Material
+    // Design, which is the weight mismatch the `music` note below describes.
+    "podcast": "󰍬",
     "remove": "󰅖",
     "moveUp": "󰅃",
     "moveDown": "󰅀"
@@ -2286,8 +2306,8 @@ BarWidget {
             anchors.leftMargin: Style.space(6)
             // A note is a sentence, not a thing to play, so it is never a
             // station however its text reads.
-            visible: entry.actionable && root.isStreamRow(entry.payload)
-            text: root.glyphs.radio
+            visible: entry.actionable && text !== ""
+            text: root.markFor(entry.payload)
             color: root.secondaryFg
             font.family: root.bar.fontFamily
             font.pixelSize: Style.font.body
