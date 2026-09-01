@@ -50,7 +50,7 @@ the plugin is installed by copying over the previous copy, so changes to
 | `glyphs` | see below | Per-glyph overrides. Each key falls back on its own, so overriding one does not mean restating the rest. |
 | `searchService` | `"TuneIn"` | Which service the picker's **Search** row queries. `""` turns searching off entirely. Only services x2rock can reach are valid — `x2rock search` lists them, and `x2rock link` adds to that list. |
 | `searchCount` | `20` | Hits fetched per search. Minimum 1. |
-| `browseServices` | whatever `searchService` is | Which services the picker offers to **walk**, as an array of names. A service's own containers — a personal library, a "For You", a genre tree — are the half of a service no search term can name. `[]` turns browsing off; unset, one row appears for `searchService`, so browsing works without configuration. |
+| `browseServices` | discovered | Which services the picker offers to **walk**, as an array of names. A service's own containers — a personal library, a "For You", a genre tree — are the half of a service no search term can name. Unset, the list is discovered: a row for `searchService`, then one per account this machine has linked (`x2rock accounts` shows them), because `x2rock link` already named the services that matter. Set it to choose by hand — an anonymous service beyond `searchService` only gets a row this way — and `[]` turns browsing off. |
 | `browseCount` | `100` | Rows fetched per container. Minimum 1. |
 
 ### Glyphs

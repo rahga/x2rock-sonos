@@ -94,6 +94,12 @@ BarWidget {
   /// typed now.
   property string pendingTerm: ""
 
+  // The services this machine holds a linked account for, read from
+  // `x2rock accounts --json`. That command reads one local file - no player,
+  // no service, no daemon - so it is the cheapest question the picker asks.
+  // Feeds the default `browseServices`; see the binding below for why.
+  property var linkedServices: []
+
   // Walking a service's containers. A stack rather than a current-id, because
   // the useful gesture is "back where I came from" and only the path knows
   // where that is. Empty means the picker is at home, showing favorites.
@@ -286,6 +292,9 @@ BarWidget {
     root.clearBrowse()
     root.loadFavorites()
     root.loadBookmarks()
+    // Re-read on every open, like favorites: an account linked in a terminal
+    // minutes ago should not need a shell restart to reach the picker.
+    root.loadLinkedServices()
   }
 
   function closePicker() {
@@ -540,6 +549,44 @@ BarWidget {
   function loadBookmarks() {
     if (bookmarksProc.running) return
     bookmarksProc.running = true
+  }
+
+  // `x2rock link` is already the act of configuration - a deliberate statement
+  // that this household uses that service from this machine - so the picker
+  // reads what it left behind rather than asking for the same names to be
+  // typed a second time into `shell.json`. Failure is silent because the
+  // fallback is exactly the un-discovered default: a row for `searchService`.
+  Process {
+    id: accountsProc
+    command: [root.command, "accounts", "--json"]
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        if (!text || text.trim() === "") return
+        try {
+          var parsed = JSON.parse(text)
+          if (!Array.isArray(parsed)) return
+          var names = []
+          for (var i = 0; i < parsed.length; i++) {
+            var name = String((parsed[i] && parsed[i].service) || "")
+            if (name !== "" && names.indexOf(name) === -1) names.push(name)
+          }
+          // By name. The CLI's order is by service id, and "181 before 254"
+          // means nothing to someone reading a list of rows.
+          names.sort(function(a, b) {
+            return a.toLowerCase() < b.toLowerCase() ? -1 : 1
+          })
+          root.linkedServices = names
+        } catch (e) {
+          // Leave whatever was already known; see the favorites picker.
+        }
+      }
+    }
+  }
+
+  function loadLinkedServices() {
+    if (accountsProc.running) return
+    accountsProc.running = true
   }
 
   // By name, which is what `bookmark` matches on, and which is unique enough:
@@ -1217,10 +1264,15 @@ BarWidget {
 
   // Which services the picker offers to walk. A service's own containers - a
   // personal library, a "For You", a genre tree - are the half of a linked
-  // account no search term can name, and there is no discovery UI for them:
-  // naming them here is the same bargain `searchService` already strikes.
-  // Defaults to whatever `searchService` is, so browsing appears without
-  // configuration and turns off with it.
+  // account no search term can name. Unset, the list is discovered: a row for
+  // `searchService`, then one per account this machine has linked, because
+  // `x2rock link` already named the services that matter and naming them a
+  // second time here configures nothing. The 30-odd anonymous services stay
+  // out of the discovered default on purpose - nobody chose them, and a picker
+  // that lists a catalogue answers a different question from "what should this
+  // room play". Naming `browseServices` by hand still wins verbatim, which is
+  // how one of those anonymous services gets a row - and `[]` still turns
+  // browsing off.
   readonly property var browseServices: {
     var given = setting("browseServices", null)
     if (Array.isArray(given)) {
@@ -1229,7 +1281,15 @@ BarWidget {
         if (typeof given[i] === "string" && given[i] !== "") names.push(given[i])
       return names
     }
-    return root.searchService !== "" ? [root.searchService] : []
+    var out = root.searchService !== "" ? [root.searchService] : []
+    for (var j = 0; j < root.linkedServices.length; j++) {
+      var linked = root.linkedServices[j]
+      var seen = false
+      for (var k = 0; k < out.length; k++)
+        if (out[k].toLowerCase() === linked.toLowerCase()) { seen = true; break }
+      if (!seen) out.push(linked)
+    }
+    return out
   }
   readonly property int browseCount: Math.max(1, Number(setting("browseCount", 100)) || 100)
 
