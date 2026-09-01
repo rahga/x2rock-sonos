@@ -116,6 +116,7 @@ Anything the bar's font can draw works, including plain text — `"music":
 | `searchFor` | `Search %1` — the row that runs a query. `%1` is the service |
 | `searching` / `searchError` | `Searching…` / `Could not reach %1` |
 | `addToQueue` | `Add to queue` — the `+` button's tooltip |
+| `untitledTrack` | `(no title from the player)` — a queue row the player holds no metadata for |
 | `noResults` | `Nothing found` |
 | `browseIn` | `Browse %1` — the row that opens a service's own containers. `%1` is the service |
 | `up` | `← %1` — the row back out of a container. `%1` is where it goes: the parent's name, or the service's own at the top of the tree |

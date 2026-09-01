@@ -1320,6 +1320,8 @@ BarWidget {
     // The + button'''s tooltip. A verb, because the glyph alone does not say
     // whether it adds here or plays next.
     "addToQueue": "Add to queue",
+    // A queue row the player holds no metadata for. Says whose silence it is.
+    "untitledTrack": "(no title from the player)",
     "searchError": "Could not reach %1",
     "noResults": "Nothing found",
     // Walking a service's own containers. %1 is a service name in `browseIn`
@@ -2615,7 +2617,14 @@ BarWidget {
 
             Text {
               width: parent.width
-              text: track.modelData.title || ""
+              // Named rather than blank. The Sonos app's "..." -> Play Now adds
+              // a queue entry with no metadata at all - verified 2026-09-01,
+              // and tapping the track on its now-playing view does not do it -
+              // so an empty row is a real state the player is in, not a read
+              // that failed. A blank line would read as corruption.
+              text: String(track.modelData.title || "") !== ""
+                ? track.modelData.title
+                : root.strings.untitledTrack
               // The playing track is the one thing here worth weight.
               color: track.current ? root.bar.foreground : root.secondaryFg
               font.bold: track.current
