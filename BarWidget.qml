@@ -684,11 +684,14 @@ BarWidget {
   ///
   /// - `search` and `browse` carry SMAPI's `itemType`, where a station is
   ///   `stream`. Verified against TuneIn on 2026-09-01.
-  /// - `favorites` carries the DIDL-Lite `upnp:class` the favorite wears, so a
-  ///   station reads `object.item.audioItem.audioBroadcast`. That is the
-  ///   standard class for a broadcast, but it is *reasoned, not verified* -
-  ///   this household has no favorites to sample. If a radio favorite ever
-  ///   fails to get the mark, this is the line that is wrong.
+  /// - `favorites` say **`STREAM`**, in capitals. Verified 2026-09-01 against a
+  ///   Virgin Radio UK station saved from the Sonos app - the first favorite
+  ///   this household has had. Note this was *predicted wrong*: the guess was
+  ///   the DIDL-Lite class `object.item.audioItem.audioBroadcast`, and the mark
+  ///   appears anyway only because the comparison lowercases first. The
+  ///   `audiobroadcast` clause below is now untested rather than reasoned -
+  ///   kept because some other service may well answer that way, but nothing
+  ///   here has ever seen it.
   /// - `bookmarks` carries whatever x2rock stored, which is `stream` for a kept
   ///   station and so needs nothing of its own.
   ///
