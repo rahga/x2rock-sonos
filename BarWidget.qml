@@ -664,6 +664,19 @@ BarWidget {
     return !!(player && player.metadata && player.metadata["x2rock:isLiveStream"] === true)
   }
 
+  /// The station behind a live stream, when the title is not already it.
+  ///
+  /// Empty for everything else, including a station whose name *is* the title -
+  /// TuneIn has no track, so the name on the line above is already the station
+  /// and repeating it says nothing. Sonos Radio is the case this exists for: it
+  /// names the track and leaves the station only in the container, so without
+  /// this the row says "Intervallo (from \"Veruschka\") (II)" and never says
+  /// what it is playing on.
+  function stationOf(player) {
+    var name = player && player.metadata ? player.metadata["x2rock:stationName"] : ""
+    return String(name || "")
+  }
+
   /// The same question asked of a picker row, which cannot be asked the same
   /// way: the daemon's flag describes what is *playing*, and a row is a thing
   /// that is not. The three sources share field names but not vocabularies,
@@ -1704,6 +1717,25 @@ BarWidget {
                     font.family: root.bar.fontFamily
                     font.pixelSize: Style.font.caption
                     anchors.verticalCenter: parent.verticalCenter
+
+                    // The station, on the one thing that is always there to
+                    // point at. The line below carries it when there is room,
+                    // but it elides on a narrow panel and is absent when the
+                    // title already is the station - and the mark is neither.
+                    MouseArea {
+                      anchors.fill: parent
+                      anchors.margins: -Style.space(2)
+                      hoverEnabled: true
+                      onEntered: {
+                        if (!root.bar) return
+                        // Falls back to the title, which on a service with no
+                        // track *is* the station. Never an empty tooltip.
+                        var name = root.stationOf(roomRow.player)
+                          || String(roomRow.player.trackTitle || "")
+                        if (name !== "") root.bar.showTooltip(nowMark, name)
+                      }
+                      onExited: if (root.bar) root.bar.hideTooltip(nowMark)
+                    }
                   }
 
                   Text {
@@ -1714,15 +1746,31 @@ BarWidget {
                     // the layout assigns `x`, and a width that reads it is a
                     // binding loop waiting for a second glyph to be added.
                     width: parent.width - nowMark.width - parent.spacing
+                    // Station name when there is no title at all: without the
+                    // fallback the whole line hides, and the mark goes with it,
+                    // so a playing stream would show nothing rather than less.
                     text: roomRow.player.trackTitle
                       ? roomRow.player.trackTitle
                         + (roomRow.player.trackArtist ? " — " + roomRow.player.trackArtist : "")
-                      : ""
+                      : root.stationOf(roomRow.player)
                     color: root.secondaryFg
                     font.family: root.bar.fontFamily
                     font.pixelSize: Style.font.caption
                     elide: Text.ElideRight
                   }
+                }
+
+                // Only where the title is the track and the station would
+                // otherwise go unsaid, which the daemon has already decided -
+                // it sends nothing when the name above is already the station.
+                Text {
+                  width: parent.width
+                  visible: text !== ""
+                  text: root.stationOf(roomRow.player)
+                  color: root.offFg
+                  font.family: root.bar.fontFamily
+                  font.pixelSize: Style.font.caption
+                  elide: Text.ElideRight
                 }
               }
 
