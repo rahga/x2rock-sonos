@@ -83,7 +83,16 @@ which is an ordinary Unicode character. Override any subset:
 `party` is the one plain-Unicode default, and draws in almost any font. If your
 bar's font is **not** a patched Nerd Font every other glyph here comes out as a
 box, and plain characters are the fix — `"music": "♪"` (U+266A) is the note for
-that case.
+that case, and `"radio": "📻"` (U+1F4FB) the radio set.
+
+Both come at a cost on a bar whose font *is* patched, which is why neither is
+the default. JetBrainsMono Nerd Font has neither codepoint, so each one is a
+per-character fallback to some other font at some other weight. 📻 is the
+louder of the two: `RADIO` is `Emoji_Presentation=Yes`, so fontconfig resolves
+it to Noto Color Emoji and it arrives in full colour beside seventeen
+monochrome line icons — and, being colour, it ignores the row's foreground and
+stops dimming with its neighbours. Appending U+FE0E asks for text presentation
+instead, which helps only if a font on the box draws it that way.
 
 `music` was called `favorites` before the picker grew browsing and search, and
 that name still works: a `shell.json` written against it needs no editing.
