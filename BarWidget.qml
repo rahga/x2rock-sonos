@@ -498,7 +498,11 @@ BarWidget {
     return !!(item && item.queueable === true)
   }
 
-  Process { id: queueItemProc }
+  Process {
+    id: queueItemProc
+    // Adding is an edit like any other, so the open panel has to hear about it.
+    onExited: root.loadQueue()
+  }
 
   /// Add without playing, and without closing the picker - the point of a
   /// separate button is queueing several things in a row, which a picker that
@@ -1035,9 +1039,16 @@ BarWidget {
 
   // The queue, like favorites, is something MPRIS cannot carry: it describes one
   // track, not the list around it. So the list comes from the CLI, read when the
-  // view is opened and again whenever the daemon says the queue moved - never on
-  // a timer. x2rock:queueVersion changes however the queue changed, including
-  // from the Sonos app, which is what keeps this honest when someone else edits.
+  // view is opened and again after every edit this widget makes - never on a
+  // timer.
+  //
+  // It used to say it also re-read whenever the daemon reported the queue had
+  // moved, "including from the Sonos app, which is what keeps this honest when
+  // someone else edits". That was never true: see `queueEditProc` for why
+  // x2rock:queueVersion is always empty. The binding below is left in place
+  // because it costs nothing and would start working if a player ever sent the
+  // field - but nothing depends on it, and **an edit made elsewhere still will
+  // not show up until the panel is reopened.**
   property string queueFor: ""
   property var queueItems: []
   property int queueTotal: 0
@@ -1092,8 +1103,26 @@ BarWidget {
     }
   }
 
-  /// Edits are fire-and-forget; the version bump brings the new list back.
-  Process { id: queueEditProc }
+  /// An edit re-reads the list itself, because the version bump it used to wait
+  /// for never arrives.
+  ///
+  /// `x2rock:queueVersion` is empty and stays empty: the daemon takes it from
+  /// `playbackStatus.queueVersion`, and this household's players do not send
+  /// that field - not in `getPlaybackStatus`, and not in an event either
+  /// (checked 2026-09-01 by forcing a real pause and a real play). So
+  /// `onQueueVersionChanged` has never fired, and a fire-and-forget edit left
+  /// the panel showing the list from before it.
+  ///
+  /// That is not cosmetic. The rows carry **positions**, so acting on a stale
+  /// list removes or moves the wrong track - which is exactly what happened
+  /// when a queue was added to twice and then edited.
+  Process {
+    id: queueEditProc
+    onExited: function(code) {
+      if (code !== 0) root.queueStatus = root.strings.queueError
+      root.loadQueue()
+    }
+  }
 
   function loadQueue() {
     if (root.queueFor === "" || queueProc.running) return
