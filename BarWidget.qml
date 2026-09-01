@@ -656,6 +656,14 @@ BarWidget {
     return !!(player && player.metadata && player.metadata["x2rock:hasTvInput"] === true)
   }
 
+  /// Whether what is playing is a live stream - internet radio, and anything
+  /// else the player resolves continuously rather than as an item. Strictly
+  /// `=== true`, like the other flags: an older daemon sends no such key, and
+  /// undefined must read as "no" rather than mark every room a station.
+  function isLiveStream(player) {
+    return !!(player && player.metadata && player.metadata["x2rock:isLiveStream"] === true)
+  }
+
   Process { id: tvProc }
 
   function switchToTv(room) {
@@ -1114,6 +1122,10 @@ BarWidget {
     "ungroup": "󰌸",
     "tv": "󰠹",
     "queue": "󰲹",
+    // nf-md-radio_tower (U+F043B), beside the name of anything the player is
+    // resolving continuously rather than as an item. The tower rather than a
+    // radio set: what it marks is a broadcast, not the receiver.
+    "radio": "󰐻",
     "remove": "󰅖",
     "moveUp": "󰅃",
     "moveDown": "󰅀"
@@ -1444,7 +1456,9 @@ BarWidget {
       if (!root.bar || !root.focused) return
       var line = root.focused.identity
       if (root.focused.trackTitle)
-        line += ": " + root.focused.trackTitle
+        line += ": "
+          + (root.isLiveStream(root.focused) ? root.glyphs.radio + " " : "")
+          + root.focused.trackTitle
           + (root.focused.trackArtist ? " — " + root.focused.trackArtist : "")
       root.bar.showTooltip(root, line)
     }
@@ -1622,17 +1636,47 @@ BarWidget {
                   elide: Text.ElideRight
                 }
 
-                Text {
+                // A live stream is marked rather than described. The name of a
+                // station reads exactly like the name of a track - "Jazz Club"
+                // says nothing about whether it ends - and the difference is
+                // what decides whether seeking or a queue position mean
+                // anything. The glyph carries it in the width a glyph costs.
+                Row {
                   width: parent.width
-                  visible: text !== ""
-                  text: roomRow.player.trackTitle
-                    ? roomRow.player.trackTitle
-                      + (roomRow.player.trackArtist ? " — " + roomRow.player.trackArtist : "")
-                    : ""
-                  color: root.secondaryFg
-                  font.family: root.bar.fontFamily
-                  font.pixelSize: Style.font.caption
-                  elide: Text.ElideRight
+                  spacing: nowMark.visible ? Style.space(4) : 0
+                  visible: nowText.text !== ""
+
+                  Text {
+                    id: nowMark
+                    visible: root.isLiveStream(roomRow.player)
+                    // A hidden Item still reports its implicit width, and Row
+                    // lays out only what is visible - so the title's width has
+                    // to ask whether the mark is there, not just how wide it is.
+                    width: visible ? implicitWidth : 0
+                    text: root.glyphs.radio
+                    color: root.secondaryFg
+                    font.family: root.bar.fontFamily
+                    font.pixelSize: Style.font.caption
+                    anchors.verticalCenter: parent.verticalCenter
+                  }
+
+                  Text {
+                    id: nowText
+                    // Whatever the mark did not take, so a long title elides at
+                    // the row's edge rather than past it. Computed from the
+                    // mark rather than from this item's own `x`: inside a Row
+                    // the layout assigns `x`, and a width that reads it is a
+                    // binding loop waiting for a second glyph to be added.
+                    width: parent.width - nowMark.width - parent.spacing
+                    text: roomRow.player.trackTitle
+                      ? roomRow.player.trackTitle
+                        + (roomRow.player.trackArtist ? " — " + roomRow.player.trackArtist : "")
+                      : ""
+                    color: root.secondaryFg
+                    font.family: root.bar.fontFamily
+                    font.pixelSize: Style.font.caption
+                    elide: Text.ElideRight
+                  }
                 }
               }
 
