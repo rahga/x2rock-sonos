@@ -697,6 +697,10 @@ BarWidget {
   /// - `bookmarks` carries whatever x2rock stored, which is `stream` for a kept
   ///   station and so needs nothing of its own.
   ///
+  /// An audiobook is `AUDIOBOOK` from a favorite and `chapter.audiobook` from
+  /// a playing Audible track, both verified 2026-09-01, so that one matches on
+  /// a substring where the others match whole.
+  ///
   /// A podcast *show* is `show`, and gets the microphone. Its episodes are
   /// typed `track` - identical to a song, with nothing on the row telling them
   /// apart - so the show is the only honest place to mark. It is also the row
@@ -712,6 +716,10 @@ BarWidget {
       return root.glyphs.radio
     if (kind === "show")
       return root.glyphs.podcast
+    // Substring rather than equality: a favorite says AUDIOBOOK and a playing
+    // Audible track says chapter.audiobook, and both are the same answer.
+    if (kind.indexOf("audiobook") !== -1)
+      return root.glyphs.audiobook
     return ""
   }
 
@@ -1188,6 +1196,11 @@ BarWidget {
     // It is also Font Awesome where every other glyph here is Material
     // Design, which is the weight mismatch the `music` note below describes.
     "podcast": "󰍬",
+    // An open book (nf-md-book_open_variant, U+F05DA) rather than headphones
+    // (U+F02CB), which was the other legible candidate. The marks say what a
+    // row *is*, not what plays it, and headphones beside the `speaker` glyph
+    // already in this set would read as a device rather than a kind.
+    "audiobook": "󰗚",
     "remove": "󰅖",
     "moveUp": "󰅃",
     "moveDown": "󰅀"

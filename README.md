@@ -77,6 +77,7 @@ which is an ordinary Unicode character. Override any subset:
 | `radio` | `󰐻` | Before the name, when the room is playing a live stream. Hovering it names the station |
 | `stop` | `󰓛` | Stands in for `pause` on a source that refuses to be paused, such as a live stream |
 | `podcast` | `󰍬` | Before the name of a podcast show in the picker. A microphone, not the podcast icon proper, which reads too much like `radio` beside it |
+| `audiobook` | `󰗚` | Before the name of an audiobook. An open book rather than headphones: the marks say what a row is, not what plays it |
 | `remove` | `󰅖` | Drop a track from the queue |
 | `moveUp` | `󰅃` | Move a queue track earlier |
 | `moveDown` | `󰅀` | Move a queue track later |
