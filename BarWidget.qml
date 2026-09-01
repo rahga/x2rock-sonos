@@ -485,6 +485,35 @@ BarWidget {
     root.browseAnsweredFor = ""
   }
 
+  /// Whether a row can be added to a queue, which the CLI decides rather than
+  /// this file. `search`/`browse --json` carry `queueable` for exactly this:
+  /// a live stream has no queue form, a container may be refused even when a
+  /// service marks it playable, and a service missing from the player's type
+  /// list has no cdudn to name the account with. Only the CLI knows the third.
+  ///
+  /// Strictly `=== true`, like every other flag read here: an older CLI sends
+  /// no such field, and undefined must hide the button rather than offer one
+  /// that cannot work.
+  function canQueue(item) {
+    return !!(item && item.queueable === true)
+  }
+
+  Process { id: queueItemProc }
+
+  /// Add without playing, and without closing the picker - the point of a
+  /// separate button is queueing several things in a row, which a picker that
+  /// dismissed itself would make worse than pressing play once.
+  function queueSearchResult(room, item) {
+    if (!item || queueItemProc.running || !root.canQueue(item)) return
+    var service = String(item.service || root.searchService)
+    var command = [root.command, "queue-item", "-s", service,
+                   String(item.id), "--title", String(item.name || ""),
+                   "-r", room]
+    if (item.type) command.push("--kind", String(item.type))
+    queueItemProc.command = command
+    queueItemProc.running = true
+  }
+
   // `play-item`, not `search --play N`: the widget already holds the id, and
   // re-running the search to find it again would cost a second round trip and
   // could land on a different hit if the service reordered.
@@ -1201,6 +1230,10 @@ BarWidget {
     // row *is*, not what plays it, and headphones beside the `speaker` glyph
     // already in this set would read as a device rather than a kind.
     "audiobook": "󰗚",
+    // The picker's add-to-queue affordance. A plain "+" rather than a Nerd Font
+    // icon: it is the one mark here that has to read as a *verb*, and every
+    // font draws it.
+    "add": "+",
     "remove": "󰅖",
     "moveUp": "󰅃",
     "moveDown": "󰅀"
@@ -1255,6 +1288,9 @@ BarWidget {
     // points `searchService` somewhere else gets sentences that still read.
     "searchFor": "Search %1",
     "searching": "Searching…",
+    // The + button'''s tooltip. A verb, because the glyph alone does not say
+    // whether it adds here or plays next.
+    "addToQueue": "Add to queue",
     "searchError": "Could not reach %1",
     "noResults": "Nothing found",
     // Walking a service's own containers. %1 is a service name in `browseIn`
@@ -2306,6 +2342,43 @@ BarWidget {
             font.pixelSize: Style.font.body
           }
 
+          // Add to the queue rather than play now, on the right where the row
+          // already puts what it *does* - the chevron says "go here", this says
+          // "keep this for later", and the two are mutually exclusive because a
+          // container is never queueable.
+          //
+          // Whether it appears is the CLI's answer, not a guess from the type:
+          // see `canQueue`. A row that cannot be queued simply has no button,
+          // rather than one that reports a failure after the fact.
+          Text {
+            id: entryAdd
+            anchors.verticalCenter: parent.verticalCenter
+            anchors.right: parent.right
+            anchors.rightMargin: Style.space(8)
+            visible: entry.actionable && root.canQueue(entry.payload)
+            text: root.glyphs.add
+            color: addArea.containsMouse ? root.bar.foreground : root.secondaryFg
+            font.family: root.bar.fontFamily
+            font.pixelSize: Style.font.body
+
+            MouseArea {
+              id: addArea
+              anchors.fill: parent
+              // Room to hit without widening the column the text lives in.
+              anchors.margins: -Style.space(5)
+              hoverEnabled: true
+              cursorShape: Qt.PointingHandCursor
+              onEntered: if (root.bar) root.bar.showTooltip(entryAdd, root.strings.addToQueue)
+              onExited: if (root.bar) root.bar.hideTooltip(entryAdd)
+              // The row underneath would play it. Adding is a different verb,
+              // so the press must not reach it.
+              onClicked: function(mouse) {
+                mouse.accepted = true
+                root.queueSearchResult(root.pickingFor, entry.payload)
+              }
+            }
+          }
+
           // The same mark the room row gives what is playing, for a row that
           // is not playing yet. A station and an album are the same shape in
           // this list - a cover, a name, a service - and which one a row is
@@ -2332,7 +2405,9 @@ BarWidget {
             anchors.left: entryMark.visible
               ? entryMark.right
               : (entryArt.visible ? entryArt.right : parent.left)
-            anchors.right: entryInto.visible ? entryInto.left : parent.right
+            anchors.right: entryInto.visible
+              ? entryInto.left
+              : (entryAdd.visible ? entryAdd.left : parent.right)
             anchors.leftMargin: Style.space(6)
             anchors.rightMargin: Style.space(8)
             spacing: Style.space(1)

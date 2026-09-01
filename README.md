@@ -78,6 +78,7 @@ which is an ordinary Unicode character. Override any subset:
 | `stop` | `󰓛` | Stands in for `pause` on a source that refuses to be paused, such as a live stream |
 | `podcast` | `󰍬` | Before the name of a podcast show in the picker. A microphone, not the podcast icon proper, which reads too much like `radio` beside it |
 | `audiobook` | `󰗚` | Before the name of an audiobook. An open book rather than headphones: the marks say what a row is, not what plays it |
+| `add` | `+` | On the right of a picker row, adds it to the queue instead of playing it. Only on rows the CLI reports as queueable |
 | `remove` | `󰅖` | Drop a track from the queue |
 | `moveUp` | `󰅃` | Move a queue track earlier |
 | `moveDown` | `󰅀` | Move a queue track later |
@@ -114,6 +115,7 @@ Anything the bar's font can draw works, including plain text — `"music":
 | `noMatch` | `No match` |
 | `searchFor` | `Search %1` — the row that runs a query. `%1` is the service |
 | `searching` / `searchError` | `Searching…` / `Could not reach %1` |
+| `addToQueue` | `Add to queue` — the `+` button's tooltip |
 | `noResults` | `Nothing found` |
 | `browseIn` | `Browse %1` — the row that opens a service's own containers. `%1` is the service |
 | `up` | `← %1` — the row back out of a container. `%1` is where it goes: the parent's name, or the service's own at the top of the tree |
