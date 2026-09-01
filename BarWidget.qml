@@ -664,6 +664,28 @@ BarWidget {
     return !!(player && player.metadata && player.metadata["x2rock:isLiveStream"] === true)
   }
 
+  /// The same question asked of a picker row, which cannot be asked the same
+  /// way: the daemon's flag describes what is *playing*, and a row is a thing
+  /// that is not. The three sources share field names but not vocabularies,
+  /// because each passes through what its own origin called the item:
+  ///
+  /// - `search` and `browse` carry SMAPI's `itemType`, where a station is
+  ///   `stream`. Verified against TuneIn on 2026-09-01.
+  /// - `favorites` carries the DIDL-Lite `upnp:class` the favorite wears, so a
+  ///   station reads `object.item.audioItem.audioBroadcast`. That is the
+  ///   standard class for a broadcast, but it is *reasoned, not verified* -
+  ///   this household has no favorites to sample. If a radio favorite ever
+  ///   fails to get the mark, this is the line that is wrong.
+  /// - `bookmarks` carries whatever x2rock stored, which is `stream` for a kept
+  ///   station and so needs nothing of its own.
+  ///
+  /// Unknown reads as "no": an unmarked station is a smaller wrong than a
+  /// marked album.
+  function isStreamRow(item) {
+    var kind = String((item && item.type) || "").toLowerCase()
+    return kind === "stream" || kind.indexOf("audiobroadcast") !== -1
+  }
+
   Process { id: tvProc }
 
   function switchToTv(room) {
@@ -2174,10 +2196,32 @@ BarWidget {
             font.pixelSize: Style.font.body
           }
 
+          // The same mark the room row gives what is playing, for a row that
+          // is not playing yet. A station and an album are the same shape in
+          // this list - a cover, a name, a service - and which one a row is
+          // decides whether it ends, whether it can be seeked, and what
+          // "play" even means. Left of the name, after the cover, so the
+          // names still start on one line down the list.
+          Text {
+            id: entryMark
+            anchors.verticalCenter: parent.verticalCenter
+            anchors.left: entryArt.visible ? entryArt.right : parent.left
+            anchors.leftMargin: Style.space(6)
+            // A note is a sentence, not a thing to play, so it is never a
+            // station however its text reads.
+            visible: entry.actionable && root.isStreamRow(entry.payload)
+            text: root.glyphs.radio
+            color: root.secondaryFg
+            font.family: root.bar.fontFamily
+            font.pixelSize: Style.font.body
+          }
+
           Column {
             id: entryText
             anchors.verticalCenter: parent.verticalCenter
-            anchors.left: entryArt.visible ? entryArt.right : parent.left
+            anchors.left: entryMark.visible
+              ? entryMark.right
+              : (entryArt.visible ? entryArt.right : parent.left)
             anchors.right: entryInto.visible ? entryInto.left : parent.right
             anchors.leftMargin: Style.space(6)
             anchors.rightMargin: Style.space(8)
