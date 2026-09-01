@@ -390,8 +390,14 @@ BarWidget {
     if (term === "" || !root.searchEnabled || searchProc.running) return
     root.pendingTerm = term
     root.searchStatus = root.strings.searching
-    searchProc.command = [root.command, "search", "-s", root.searchService,
-                          "--json", "--count", String(root.searchCount), term]
+    var command = [root.command, "search", "-s", root.searchService,
+                   "--json", "--count", String(root.searchCount)]
+    // Without this the CLI searches the service's default category, which for
+    // a service with no "all" is whatever its presentation map lists first -
+    // Plex leads with artists, and a song title searched there finds nothing.
+    if (root.searchCategory !== "") command.push("-c", root.searchCategory)
+    command.push(term)
+    searchProc.command = command
     searchProc.running = true
   }
 
@@ -1261,6 +1267,11 @@ BarWidget {
   readonly property string searchService: String(setting("searchService", "TuneIn") || "")
   readonly property bool searchEnabled: searchService !== ""
   readonly property int searchCount: Math.max(1, Number(setting("searchCount", 20)) || 20)
+  // Which of the service's categories the search row queries, passed to the
+  // CLI as `-c`. Empty means the CLI's default (the service's "all" when it
+  // has one, else its first category). Worth setting for a library-shaped
+  // service: "tracks" is what a song title typed into a picker means on Plex.
+  readonly property string searchCategory: String(setting("searchCategory", "") || "")
 
   // Which services the picker offers to walk. A service's own containers - a
   // personal library, a "For You", a genre tree - are the half of a linked
