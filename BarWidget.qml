@@ -1148,6 +1148,10 @@ BarWidget {
     // resolving continuously rather than as an item. The tower rather than a
     // radio set: what it marks is a broadcast, not the receiver.
     "radio": "󰐻",
+    // nf-md-stop (U+F04DB). Stands in for `pause` on a source that refuses to
+    // be paused - see `stopRather` for which ones do and why it is not a
+    // second button.
+    "stop": "󰓛",
     "remove": "󰅖",
     "moveUp": "󰅃",
     "moveDown": "󰅀"
@@ -1381,10 +1385,30 @@ BarWidget {
   // a second copy of "which repeat states does this source allow" is a second
   // thing to get wrong. Each one takes the room it acts on and makes it the
   // focused one, which is what the pill and the scroll gesture follow.
+  /// Whether this room's transport button should read "stop" rather than
+  /// "pause" - which is the player's own answer, not a guess about the source.
+  ///
+  /// A live stream reports `canPause: false` and `canStop: true`, and MPRIS
+  /// carries the first through as `CanPause`. Quickshell gates
+  /// `canTogglePlaying` on it, so the pause button was inert on a station: it
+  /// looked like a working control and did nothing, which is worse than not
+  /// offering one.
+  ///
+  /// Only while playing. Stopped, the same button is `play` and MPRIS allows
+  /// that - `CanPlay` stays true on a station, which is how it starts again.
+  function stopRather(player) {
+    return !!(player && player.isPlaying && !player.canPause)
+  }
+
   function togglePlay(player) {
-    if (!player || !player.canTogglePlaying) return
+    if (!player) return
     root.focusedName = player.identity
-    player.togglePlaying()
+    // Stop is a different MPRIS verb from pause and is gated on CanControl
+    // rather than CanPause, which is exactly why it works here. It maps to the
+    // player's own `pause`, which does stop a stream - the refusal was never
+    // the command, only the capability flag in front of it.
+    if (root.stopRather(player)) player.stop()
+    else if (player.canTogglePlaying) player.togglePlaying()
   }
 
   function skip(player, forward) {
@@ -1833,7 +1857,9 @@ BarWidget {
               }
 
               Text {
-                text: roomRow.player.isPlaying ? root.glyphs.pause : root.glyphs.play
+                text: root.stopRather(roomRow.player)
+                  ? root.glyphs.stop
+                  : (roomRow.player.isPlaying ? root.glyphs.pause : root.glyphs.play)
                 color: root.bar.foreground
                 font.family: root.bar.fontFamily
                 font.pixelSize: Style.font.body

@@ -75,6 +75,7 @@ which is an ordinary Unicode character. Override any subset:
 | `tv` | `󰠹` | Switches a soundbar to its TV input, and stands in for cover art while it is on TV |
 | `queue` | `󰲹` | Opens that room's queue |
 | `radio` | `󰐻` | Before the name, when the room is playing a live stream |
+| `stop` | `󰓛` | Stands in for `pause` on a source that refuses to be paused, such as a live stream |
 | `remove` | `󰅖` | Drop a track from the queue |
 | `moveUp` | `󰅃` | Move a queue track earlier |
 | `moveDown` | `󰅀` | Move a queue track later |
