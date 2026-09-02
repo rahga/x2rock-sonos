@@ -4,6 +4,7 @@
   "name": "Sonos",
   "version": "0.1.0",
   "author": "Richard Hoelscher",
+  "license": "0BSD",
   "description": "Per-room Sonos control via x2rock: now-playing, transport, and room volume",
   "kinds": ["bar-widget"],
   "entryPoints": {

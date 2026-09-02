@@ -6,6 +6,12 @@ browsing and searching a music service, grouping and party mode. Driven entirely
 Needs `x2rock` on `PATH` and `x2rock daemon` running. With no daemon there are
 no players, and the widget hides itself.
 
+![The popup: every room with per-room transport, volume and TV badges](preview.png)
+
+`preview.png` is the plugin's gallery image (per the Omarchy plugin spec) and the
+shot above — regenerate it from the running popup and overwrite the file to keep
+both current.
+
 ## Configuring
 
 Everything below is set on this widget's entry in the `bar.layout` subtree of

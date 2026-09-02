@@ -56,6 +56,14 @@ BarWidget {
   readonly property bool opened: popupOpen
   function open() { popupOpen = true }
 
+  // The bar reads this next to `opened` to coordinate the close when someone
+  // switches straight from this popout to another widget's. x2rock drives no
+  // such transition itself - each KeyboardPanel below manages its own focus and
+  // dismissal - so it is always false. Declaring it also gives the base
+  // KeyboardPanel a defined property to read off its `owner` (it evaluates
+  // `!!(owner.popoutSwitchClosing)`) instead of an undefined one.
+  readonly property bool popoutSwitchClosing: false
+
   // Favorites are the one thing here that MPRIS cannot carry - it has no notion
   // of them, and Quickshell's Mpris does not implement the optional Playlists
   // interface either - so they come from the CLI instead. Fetched only when the
