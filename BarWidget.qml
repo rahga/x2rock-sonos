@@ -775,6 +775,15 @@ BarWidget {
     return !!(player && player.metadata && player.metadata["x2rock:onTvInput"] === true)
   }
 
+  /// Whether the room has nothing loaded at all - the Sonos app's "No Content":
+  /// no current item, no container, a queue that was cleared. The daemon says so
+  /// with one key, because only it can see that there is no item; the player's
+  /// own flags (`canPlay`, `canPause`, skip) all read false here too, but so do
+  /// they on a room that is on its TV input, which has a source.
+  function noSource(player) {
+    return !!(player && player.metadata && player.metadata["x2rock:noSource"] === true)
+  }
+
   function hasTvInput(player) {
     return !!(player && player.metadata && player.metadata["x2rock:hasTvInput"] === true)
   }
@@ -861,6 +870,9 @@ BarWidget {
   /// A stream that carries a real track keeps the ordinary shape: its title
   /// stays on top and its station is already a field of its own.
   function nowLine(player) {
+    // Nothing loaded: say so, as the Sonos app does, rather than an empty line
+    // that hides the mark with it.
+    if (root.noSource(player)) return "No content"
     if (!player) return ""
     if (!root.stationOf(player) && root.isLiveStream(player)) {
       var info = root.streamInfoOf(player)
@@ -1720,8 +1732,13 @@ BarWidget {
   /// MouseArea out of the input path - `enabled` propagates to children, which
   /// is what disarms the cursor shape with it. So the space stays exactly as
   /// wide as the controls it is not offering, and nothing else moves.
+  ///
+  /// Also false with no source at all, for the same reason and with the same
+  /// answer from the Sonos app: it shows "No Content", withdraws transport, the
+  /// position bar and the modes, and leaves volume and mute. Before this the
+  /// play button was lit on such a room and did nothing.
   function transportAvailable(player) {
-    return !!player && !root.onTvInput(player)
+    return !!player && !root.onTvInput(player) && !root.noSource(player)
   }
 
   function togglePlay(player) {
