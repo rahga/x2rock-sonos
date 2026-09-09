@@ -2018,7 +2018,14 @@ BarWidget {
 
               Text {
                 text: root.glyphs.previous
-                visible: root.transportAvailable(roomRow.player)
+                // Held, not hidden: a Row skips an invisible child, so
+                // `visible` here let the picker, queue and slider slide left
+                // into the gap and the popup reflowed the moment a room went
+                // to TV input. Opacity keeps the glyph's width in the layout
+                // and `enabled` takes its MouseArea out, so the space stays
+                // exactly as wide as the controls that are not being offered.
+                opacity: root.transportAvailable(roomRow.player) ? 1 : 0
+                enabled: root.transportAvailable(roomRow.player)
                 color: roomRow.player.canGoPrevious
                   ? root.bar.foreground : root.disabledFg
                 font.family: root.bar.fontFamily
@@ -2037,7 +2044,14 @@ BarWidget {
                 text: root.stopRather(roomRow.player)
                   ? root.glyphs.stop
                   : (roomRow.player.isPlaying ? root.glyphs.pause : root.glyphs.play)
-                visible: root.transportAvailable(roomRow.player)
+                // Held, not hidden: a Row skips an invisible child, so
+                // `visible` here let the picker, queue and slider slide left
+                // into the gap and the popup reflowed the moment a room went
+                // to TV input. Opacity keeps the glyph's width in the layout
+                // and `enabled` takes its MouseArea out, so the space stays
+                // exactly as wide as the controls that are not being offered.
+                opacity: root.transportAvailable(roomRow.player) ? 1 : 0
+                enabled: root.transportAvailable(roomRow.player)
                 color: root.bar.foreground
                 font.family: root.bar.fontFamily
                 font.pixelSize: Style.font.body
@@ -2053,7 +2067,14 @@ BarWidget {
 
               Text {
                 text: root.glyphs.next
-                visible: root.transportAvailable(roomRow.player)
+                // Held, not hidden: a Row skips an invisible child, so
+                // `visible` here let the picker, queue and slider slide left
+                // into the gap and the popup reflowed the moment a room went
+                // to TV input. Opacity keeps the glyph's width in the layout
+                // and `enabled` takes its MouseArea out, so the space stays
+                // exactly as wide as the controls that are not being offered.
+                opacity: root.transportAvailable(roomRow.player) ? 1 : 0
+                enabled: root.transportAvailable(roomRow.player)
                 color: roomRow.player.canGoNext
                   ? root.bar.foreground : root.disabledFg
                 font.family: root.bar.fontFamily
