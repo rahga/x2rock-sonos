@@ -1537,6 +1537,13 @@ BarWidget {
   /// [`stopRather`] read the two as one and offered a stop button that called a
   /// pause the player refuses. Lit control, nothing happens. Only the TV case
   /// has no verb behind it at all, so only the TV case hides.
+  /// Callers hold the slot rather than hiding it: a Row skips an invisible
+  /// child, so `visible` let the picker, queue and slider slide left into the
+  /// gap and reflowed the whole row the moment a room went to TV input.
+  /// Opacity keeps each glyph's width in the layout and `enabled` takes its
+  /// MouseArea out of the input path - `enabled` propagates to children, which
+  /// is what disarms the cursor shape with it. So the space stays exactly as
+  /// wide as the controls it is not offering, and nothing else moves.
   function transportAvailable(player) {
     return !!player && !root.onTvInput(player)
   }
@@ -2018,12 +2025,7 @@ BarWidget {
 
               Text {
                 text: root.glyphs.previous
-                // Held, not hidden: a Row skips an invisible child, so
-                // `visible` here let the picker, queue and slider slide left
-                // into the gap and the popup reflowed the moment a room went
-                // to TV input. Opacity keeps the glyph's width in the layout
-                // and `enabled` takes its MouseArea out, so the space stays
-                // exactly as wide as the controls that are not being offered.
+                // Held, not hidden - see transportAvailable.
                 opacity: root.transportAvailable(roomRow.player) ? 1 : 0
                 enabled: root.transportAvailable(roomRow.player)
                 color: roomRow.player.canGoPrevious
@@ -2044,12 +2046,7 @@ BarWidget {
                 text: root.stopRather(roomRow.player)
                   ? root.glyphs.stop
                   : (roomRow.player.isPlaying ? root.glyphs.pause : root.glyphs.play)
-                // Held, not hidden: a Row skips an invisible child, so
-                // `visible` here let the picker, queue and slider slide left
-                // into the gap and the popup reflowed the moment a room went
-                // to TV input. Opacity keeps the glyph's width in the layout
-                // and `enabled` takes its MouseArea out, so the space stays
-                // exactly as wide as the controls that are not being offered.
+                // Held, not hidden - see transportAvailable.
                 opacity: root.transportAvailable(roomRow.player) ? 1 : 0
                 enabled: root.transportAvailable(roomRow.player)
                 color: root.bar.foreground
@@ -2067,12 +2064,7 @@ BarWidget {
 
               Text {
                 text: root.glyphs.next
-                // Held, not hidden: a Row skips an invisible child, so
-                // `visible` here let the picker, queue and slider slide left
-                // into the gap and the popup reflowed the moment a room went
-                // to TV input. Opacity keeps the glyph's width in the layout
-                // and `enabled` takes its MouseArea out, so the space stays
-                // exactly as wide as the controls that are not being offered.
+                // Held, not hidden - see transportAvailable.
                 opacity: root.transportAvailable(roomRow.player) ? 1 : 0
                 enabled: root.transportAvailable(roomRow.player)
                 color: roomRow.player.canGoNext
@@ -2096,6 +2088,9 @@ BarWidget {
                 readonly property bool available: root.repeatAvailable(roomRow.player)
 
                 text: roomRow.player.loopState === MprisLoopState.Track ? root.glyphs.repeatOne : root.glyphs.repeat
+                // Held, not hidden - see transportAvailable.
+                opacity: root.transportAvailable(roomRow.player) ? 1 : 0
+                enabled: root.transportAvailable(roomRow.player)
                 color: !available ? root.disabledFg
                   : roomRow.player.loopState !== MprisLoopState.None
                     ? root.bar.foreground : root.offFg
@@ -2116,6 +2111,9 @@ BarWidget {
                 readonly property bool available: root.shuffleAvailable(roomRow.player)
 
                 text: root.glyphs.shuffle
+                // Held, not hidden - see transportAvailable.
+                opacity: root.transportAvailable(roomRow.player) ? 1 : 0
+                enabled: root.transportAvailable(roomRow.player)
                 color: !available ? root.disabledFg
                   : roomRow.player.shuffle ? root.bar.foreground : root.offFg
                 font.family: root.bar.fontFamily
