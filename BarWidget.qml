@@ -838,6 +838,40 @@ BarWidget {
     return title.indexOf(info.toLowerCase()) !== -1 ? "" : info
   }
 
+  /// The station's name, wherever the daemon put it.
+  ///
+  /// Usually its own field. For a `play-url` stream the field is empty and the
+  /// *title* is the station - the stream host - because the daemon drops the
+  /// name when it would only repeat the line above. So the fallback is not a
+  /// guess: an empty station on something known to be a live stream means the
+  /// title is carrying it.
+  function stationLabel(player) {
+    var named = root.stationOf(player)
+    if (named) return named
+    return root.isLiveStream(player) ? String(player.trackTitle || "") : ""
+  }
+
+  /// The room's now-playing line: the most specific thing known about what is
+  /// sounding, with the station left to the line underneath.
+  ///
+  /// For a `play-url` stream that inverts what the fields are called. `title`
+  /// is `ice1.somafm.com` and the only word about the music is the stream's own
+  /// headline, so the headline is promoted here and the host demoted to
+  /// [`stationLabel`] - the station named once, below, like every other stream.
+  /// A stream that carries a real track keeps the ordinary shape: its title
+  /// stays on top and its station is already a field of its own.
+  function nowLine(player) {
+    if (!player) return ""
+    if (!root.stationOf(player) && root.isLiveStream(player)) {
+      var info = root.streamInfoOf(player)
+      if (info) return info
+    }
+    var title = String(player.trackTitle || "")
+    if (!title) return root.stationOf(player)
+    var suffix = root.trackSuffix(player)
+    return title + (suffix ? " — " + suffix : "")
+  }
+
   /// Which mark a picker row earns, or "" for the rows that earn none.
   ///
   /// This cannot ask the question the room row asks: the daemon's flag
@@ -1823,8 +1857,7 @@ BarWidget {
       if (root.focused.trackTitle)
         line += ": "
           + (root.isLiveStream(root.focused) ? root.glyphs.radio + " " : "")
-          + root.focused.trackTitle
-          + (root.trackSuffix(root.focused) ? " — " + root.trackSuffix(root.focused) : "")
+          + root.nowLine(root.focused)
       root.bar.showTooltip(root, line)
     }
     onExited: if (root.bar) root.bar.hideTooltip(root)
@@ -2025,9 +2058,9 @@ BarWidget {
                     anchors.verticalCenter: parent.verticalCenter
 
                     // The station, on the one thing that is always there to
-                    // point at. The line below carries it when there is room,
-                    // but it elides on a narrow panel and is absent when the
-                    // title already is the station - and the mark is neither.
+                    // point at. The line below carries it in full, but it
+                    // elides on a narrow panel and hides when it would repeat
+                    // the line above - and the mark does neither.
                     MouseArea {
                       anchors.fill: parent
                       anchors.margins: -Style.space(2)
@@ -2055,12 +2088,7 @@ BarWidget {
                     // Station name when there is no title at all: without the
                     // fallback the whole line hides, and the mark goes with it,
                     // so a playing stream would show nothing rather than less.
-                    text: {
-                      if (!roomRow.player.trackTitle)
-                        return root.stationOf(roomRow.player)
-                      var suffix = root.trackSuffix(roomRow.player)
-                      return roomRow.player.trackTitle + (suffix ? " — " + suffix : "")
-                    }
+                    text: root.nowLine(roomRow.player)
                     color: root.secondaryFg
                     font.family: root.bar.fontFamily
                     font.pixelSize: Style.font.caption
@@ -2068,13 +2096,16 @@ BarWidget {
                   }
                 }
 
-                // Only where the title is the track and the station would
-                // otherwise go unsaid, which the daemon has already decided -
-                // it sends nothing when the name above is already the station.
+                // The station, once, under whatever is actually sounding -
+                // including a `play-url` stream's host, which the daemon leaves
+                // in the title and `stationLabel` recovers. Hidden when it would
+                // only repeat the line above, which is the case the daemon's own
+                // empty station used to cover and no longer can now that the
+                // headline is promoted over it.
                 Text {
                   width: parent.width
-                  visible: text !== ""
-                  text: root.stationOf(roomRow.player)
+                  visible: text !== "" && text !== nowText.text
+                  text: root.stationLabel(roomRow.player)
                   color: root.offFg
                   font.family: root.bar.fontFamily
                   font.pixelSize: Style.font.caption
