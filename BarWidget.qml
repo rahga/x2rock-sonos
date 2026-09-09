@@ -43,6 +43,9 @@ BarWidget {
   }
 
   property bool popupOpen: false
+  // Nothing pushes night sound or speech enhancement, so they are re-read when
+  // the popup opens - see refreshSoundbar.
+  onPopupOpenChanged: if (popupOpen) root.refreshSoundbar()
   // Only the rooms popup. The picker, the queue and the grouping panel are
   // separate surfaces with owners of their own, because a shared one would
   // have each closing the other: a KeyboardPanel dismisses by calling
@@ -324,6 +327,68 @@ BarWidget {
   /// [`soundbarState`] - so the last thing this widget did is the best answer
   /// it has until the daemon is restarted and re-reads the room.
   property var pendingSoundbar: ({})
+
+  /// Rooms still to re-read, oldest first. One at a time: a household has one
+  /// or two soundbars and the popup is rarely open, so a queue costs nothing
+  /// and spares the shell three subprocesses at once.
+  property var soundbarQueue: []
+
+  /// Re-read night sound and speech enhancement for every room now on its TV
+  /// input, because nothing pushes them.
+  ///
+  /// `RenderingControl` carries these as GENA `LastChange` events, which need
+  /// the player to connect back to us - the one transport x2rock rules out, so
+  /// the daemon's values are right when it read them and never again. The popup
+  /// opening is the moment freshness matters and the only moment it is worth
+  /// spending a subprocess on; closed, this costs nothing at all.
+  function refreshSoundbar() {
+    var due = []
+    for (var i = 0; i < root.rooms.length; i++) {
+      var p = root.rooms[i]
+      if (p && root.onTvInput(p)) due.push(p.identity)
+    }
+    root.soundbarQueue = due
+    root.nextSoundbarRead()
+  }
+
+  function nextSoundbarRead() {
+    if (soundbarReadProc.running || root.soundbarQueue.length === 0) return
+    var rest = root.soundbarQueue.slice()
+    var room = rest.shift()
+    root.soundbarQueue = rest
+    soundbarReadProc.room = room
+    soundbarReadProc.command = [root.command, "-r", room, "eq", "--json"]
+    soundbarReadProc.running = true
+  }
+
+  Process {
+    id: soundbarReadProc
+    property string room: ""
+    onExited: function(code) { root.nextSoundbarRead() }
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        if (!text || text.trim() === "") return
+        var eq
+        try {
+          eq = JSON.parse(text)
+        } catch (e) {
+          return
+        }
+        // Straight into the overlay the buttons already read: a value read a
+        // moment ago outranks one the daemon read at startup, and this is the
+        // same slot a press writes, so the two cannot disagree about which
+        // wins.
+        var overlay = {}
+        for (var k in root.pendingSoundbar) overlay[k] = root.pendingSoundbar[k]
+        if (typeof eq.night_mode === "boolean")
+          overlay[soundbarReadProc.room + ":nightMode"] = eq.night_mode
+        if (typeof eq.dialog_enhancement === "boolean")
+          overlay[soundbarReadProc.room + ":enhanceDialog"] = eq.dialog_enhancement
+        root.pendingSoundbar = overlay
+      }
+    }
+  }
 
   Process {
     id: soundbarProc
