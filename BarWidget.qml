@@ -1521,11 +1521,28 @@ BarWidget {
   /// Only while playing. Stopped, the same button is `play` and MPRIS allows
   /// that - `CanPlay` stays true on a station, which is how it starts again.
   function stopRather(player) {
-    return !!(player && player.isPlaying && !player.canPause)
+    return !!(player && player.isPlaying && !player.canPause
+              && root.transportAvailable(player))
+  }
+
+  /// Whether transport applies to this room at all - false while it is on its
+  /// TV input, where the source is the television and its own remote owns
+  /// play, pause and skip. The player says as much: a room on TV reports
+  /// `canPause`, `canSkip`, `canSkipBack`, `canSeek` and `canStop` all false,
+  /// and the Sonos app offers no transport for such a room either, only volume,
+  /// grouping, Night Sound, Speech Enhancement and a sleep timer.
+  ///
+  /// `canPause: false` alone is not enough to decide this, which is the bug it
+  /// fixes: a live stream reports that too but *can* be stopped, so
+  /// [`stopRather`] read the two as one and offered a stop button that called a
+  /// pause the player refuses. Lit control, nothing happens. Only the TV case
+  /// has no verb behind it at all, so only the TV case hides.
+  function transportAvailable(player) {
+    return !!player && !root.onTvInput(player)
   }
 
   function togglePlay(player) {
-    if (!player) return
+    if (!player || !root.transportAvailable(player)) return
     root.focusedName = player.identity
     // Stop is a different MPRIS verb from pause and is gated on CanControl
     // rather than CanPause, which is exactly why it works here. It maps to the
@@ -2001,6 +2018,7 @@ BarWidget {
 
               Text {
                 text: root.glyphs.previous
+                visible: root.transportAvailable(roomRow.player)
                 color: roomRow.player.canGoPrevious
                   ? root.bar.foreground : root.disabledFg
                 font.family: root.bar.fontFamily
@@ -2019,6 +2037,7 @@ BarWidget {
                 text: root.stopRather(roomRow.player)
                   ? root.glyphs.stop
                   : (roomRow.player.isPlaying ? root.glyphs.pause : root.glyphs.play)
+                visible: root.transportAvailable(roomRow.player)
                 color: root.bar.foreground
                 font.family: root.bar.fontFamily
                 font.pixelSize: Style.font.body
@@ -2034,6 +2053,7 @@ BarWidget {
 
               Text {
                 text: root.glyphs.next
+                visible: root.transportAvailable(roomRow.player)
                 color: roomRow.player.canGoNext
                   ? root.bar.foreground : root.disabledFg
                 font.family: root.bar.fontFamily
