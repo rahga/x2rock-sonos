@@ -1204,13 +1204,21 @@ BarWidget {
   // view is opened and again after every edit this widget makes - never on a
   // timer.
   //
-  // It used to say it also re-read whenever the daemon reported the queue had
-  // moved, "including from the Sonos app, which is what keeps this honest when
-  // someone else edits". That was never true: see `queueEditProc` for why
-  // x2rock:queueVersion is always empty. The binding below is left in place
-  // because it costs nothing and would start working if a player ever sent the
-  // field - but nothing depends on it, and **an edit made elsewhere still will
-  // not show up until the panel is reopened.**
+  // It also re-reads when `x2rock:queueVersion` moves, and that binding is
+  // live. A comment here used to say the field "is always empty" - true of the
+  // players, which send no version on this firmware, and no longer true of
+  // x2rock: the daemon stopped reading `playbackStatus.queueVersion` and now
+  // fills it from UPnP `update_id()` in `RoomPlayer::refresh_queue_version`.
+  // Measured 2026-09-09: `20` on one household, `7` on another.
+  //
+  // What it corrects itself *against* is narrower than "any edit". The daemon
+  // refreshes the version only inside its `playback:1` arm, so an edit made
+  // elsewhere is noticed when the next playback event arrives rather than when
+  // the edit lands. Whether a queue edit alone produces such an event is
+  // **untested** - settling it means mutating a real queue, and the only
+  // appendable sources here are radio stations, which do not append cleanly
+  // enough to undo. So reopening the panel is still the refresh to rely on, and
+  // this is the one that usually gets there first.
   property string queueFor: ""
   property var queueItems: []
   property int queueTotal: 0
@@ -1265,15 +1273,20 @@ BarWidget {
     }
   }
 
-  /// An edit re-reads the list itself, because the version bump it used to wait
-  /// for never arrives.
+  /// An edit re-reads the list itself rather than waiting for a version bump.
   ///
-  /// `x2rock:queueVersion` is empty and stays empty: the daemon takes it from
-  /// `playbackStatus.queueVersion`, and this household's players do not send
-  /// that field - not in `getPlaybackStatus`, and not in an event either
-  /// (checked 2026-09-01 by forcing a real pause and a real play). So
-  /// `onQueueVersionChanged` has never fired, and a fire-and-forget edit left
-  /// the panel showing the list from before it.
+  /// The reason recorded here was that `x2rock:queueVersion` "is empty and stays
+  /// empty", because the daemon took it from `playbackStatus.queueVersion` and
+  /// these players send no such field - not in `getPlaybackStatus` and not in an
+  /// event (checked 2026-09-01 by forcing a real pause and a real play). That
+  /// hole was later filled on the daemon side, from UPnP rather than from the
+  /// event, so the field does carry a version now and
+  /// `onQueueVersionChanged` does fire.
+  ///
+  /// This re-read stays anyway, and not merely from caution: the version is
+  /// refreshed only when a `playback:1` event arrives, which is not something an
+  /// edit can count on. Re-reading after an edit this widget made needs no event
+  /// at all, so it is the faster and the surer of the two.
   ///
   /// That is not cosmetic. The rows carry **positions**, so acting on a stale
   /// list removes or moves the wrong track - which is exactly what happened
