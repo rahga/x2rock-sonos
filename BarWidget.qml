@@ -800,6 +800,44 @@ BarWidget {
     return String(name || "")
   }
 
+  /// A live stream's own "now playing" text, or "" when it has none.
+  ///
+  /// The daemon already trims it and sends "" for blank - a station between
+  /// titles emits a few spaces - so this is only the read.
+  function streamInfoOf(player) {
+    if (!player || !player.metadata) return ""
+    return String(player.metadata["x2rock:streamInfo"] || "").trim()
+  }
+
+  /// What follows the title on a room's second line: the artist where there is
+  /// one, else the stream's own headline where it says something the title does
+  /// not.
+  ///
+  /// A `play-url` stream has no artist and a title that is often just the
+  /// stream host, so without this the row reads `ice1.somafm.com` while the
+  /// station is announcing a track by name.
+  ///
+  /// Filtered against the title rather than shown whenever present. In this
+  /// household the two never appear together - Kitchen and Guest TV send a full
+  /// `currentItem` and no stream info at all - but that is an observation about
+  /// two services, not a rule, and a station that puts the same text in both
+  /// would otherwise say it twice. Only text the title does not already contain
+  /// is worth a second line. Untested against hardware that sends both: nothing
+  /// here produces it, so this follows the Android TV app rather than something
+  /// seen.
+  ///
+  /// **Never split it.** `Artist - Title` is an Icecast convention, not a
+  /// format - a station may equally put a show name or a slogan there - and
+  /// splitting on the hyphen invents an artist wherever it happens to land.
+  function trackSuffix(player) {
+    if (!player) return ""
+    if (player.trackArtist) return String(player.trackArtist)
+    var info = root.streamInfoOf(player)
+    if (!info) return ""
+    var title = String(player.trackTitle || "").trim().toLowerCase()
+    return title.indexOf(info.toLowerCase()) !== -1 ? "" : info
+  }
+
   /// Which mark a picker row earns, or "" for the rows that earn none.
   ///
   /// This cannot ask the question the room row asks: the daemon's flag
@@ -1786,7 +1824,7 @@ BarWidget {
         line += ": "
           + (root.isLiveStream(root.focused) ? root.glyphs.radio + " " : "")
           + root.focused.trackTitle
-          + (root.focused.trackArtist ? " — " + root.focused.trackArtist : "")
+          + (root.trackSuffix(root.focused) ? " — " + root.trackSuffix(root.focused) : "")
       root.bar.showTooltip(root, line)
     }
     onExited: if (root.bar) root.bar.hideTooltip(root)
@@ -2017,10 +2055,12 @@ BarWidget {
                     // Station name when there is no title at all: without the
                     // fallback the whole line hides, and the mark goes with it,
                     // so a playing stream would show nothing rather than less.
-                    text: roomRow.player.trackTitle
-                      ? roomRow.player.trackTitle
-                        + (roomRow.player.trackArtist ? " — " + roomRow.player.trackArtist : "")
-                      : root.stationOf(roomRow.player)
+                    text: {
+                      if (!roomRow.player.trackTitle)
+                        return root.stationOf(roomRow.player)
+                      var suffix = root.trackSuffix(roomRow.player)
+                      return roomRow.player.trackTitle + (suffix ? " — " + suffix : "")
+                    }
                     color: root.secondaryFg
                     font.family: root.bar.fontFamily
                     font.pixelSize: Style.font.caption
