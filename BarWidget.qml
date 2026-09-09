@@ -319,6 +319,23 @@ BarWidget {
     root.pendingTerm = ""
   }
 
+  /// This session's own night/speech toggles, keyed `<room>:<metadata key>`.
+  /// Never cleared: nothing arrives to clear them against - see
+  /// [`soundbarState`] - so the last thing this widget did is the best answer
+  /// it has until the daemon is restarted and re-reads the room.
+  property var pendingSoundbar: ({})
+
+  Process {
+    id: soundbarProc
+    onExited: function(code) {
+      // The overlay stands either way. A failed write leaves the button
+      // showing something the room is not, which is wrong - but so is
+      // snapping back to a daemon value that is equally stale, and the
+      // journal is where a refused `eq` is worth reading.
+      if (code !== 0) console.warn("x2rock: eq write failed, code " + code)
+    }
+  }
+
   Process {
     id: favoritesProc
     command: [root.command, "favorites", "--json"]
@@ -1223,6 +1240,11 @@ BarWidget {
     "repeat": "󰑖",
     "repeatOne": "󰑘",
     "shuffle": "󰒝",
+    // The two the Sonos app puts in front of a room on its TV input, where it
+    // offers no transport at all. Same Material Design set as the rest:
+    // nf-md-weather_night (U+F0594) and nf-md-account_voice (U+F05CB).
+    "nightSound": "󰖔",
+    "speech": "󰗋",
     // The button that opens the picker. Named `music` rather than `favorites`
     // because the picker stopped being only favorites: it is the household's
     // favorites, this machine's kept items, a service's own containers and a
@@ -1367,6 +1389,10 @@ BarWidget {
     "tooltipParty": "Party",
     "tooltipPartyOn": "Party (on)",
     "tooltipGroup": "Group",
+    // Named as the Sonos app names them, so the two agree in front of someone
+    // holding a phone in one hand and looking at the bar with the other.
+    "tooltipNightSound": "Night Sound",
+    "tooltipSpeech": "Speech Enhancement",
     // %1 is the size of the group the room is already in. A placeholder
     // rather than a fragment because this is the one phrase here where a
     // number sits mid-sentence, and languages disagree about where.
@@ -1557,6 +1583,48 @@ BarWidget {
     // the command, only the capability flag in front of it.
     if (root.stopRather(player)) player.stop()
     else if (player.canTogglePlaying) player.togglePlaying()
+  }
+
+  /// Night sound and speech enhancement, the two the Sonos app offers a room on
+  /// its TV input. Present only for a soundbar - the daemon omits both keys
+  /// otherwise - so an absent key means "no such setting here", not "off".
+  function soundbarSetting(player, key) {
+    if (!player || !player.metadata) return undefined
+    var v = player.metadata["x2rock:" + key]
+    return v === undefined ? undefined : v === true
+  }
+
+  /// What the button should read, with this session's own toggles laid over the
+  /// daemon's value.
+  ///
+  /// The overlay is not impatience, it is the only thing there is: the
+  /// `homeTheater:1` subscription accepts a subscribe and then never sends an
+  /// event, so a write - ours or the Sonos app's - does not come back. The
+  /// daemon's value is therefore right when it was read and never again, and a
+  /// button with no overlay would show the opposite of what it just did.
+  function soundbarState(player, key) {
+    if (!player) return undefined
+    var pending = root.pendingSoundbar[player.identity + ":" + key]
+    if (pending !== undefined) return pending
+    return root.soundbarSetting(player, key)
+  }
+
+  /// Flip one of them. The write is `x2rock eq`, because MPRIS has no verb for
+  /// either and the Control API refuses the write (`ERROR_NO_PERMISSION`) - it
+  /// goes out over UPnP `SetEQ`, which is what the CLI already does.
+  function toggleSoundbar(player, key, flag) {
+    if (!player) return
+    var now = root.soundbarState(player, key)
+    if (now === undefined) return
+    root.focusedName = player.identity
+    var next = !now
+    var overlay = {}
+    for (var k in root.pendingSoundbar) overlay[k] = root.pendingSoundbar[k]
+    overlay[player.identity + ":" + key] = next
+    root.pendingSoundbar = overlay
+    soundbarProc.command = [root.command, "-r", player.identity,
+                            "eq", flag, next ? "on" : "off"]
+    soundbarProc.running = true
   }
 
   function skip(player, forward) {
@@ -2088,9 +2156,11 @@ BarWidget {
                 readonly property bool available: root.repeatAvailable(roomRow.player)
 
                 text: roomRow.player.loopState === MprisLoopState.Track ? root.glyphs.repeatOne : root.glyphs.repeat
-                // Held, not hidden - see transportAvailable.
-                opacity: root.transportAvailable(roomRow.player) ? 1 : 0
-                enabled: root.transportAvailable(roomRow.player)
+                // Collapsed, not held: unlike the three transport glyphs
+                // these two are replaced rather than withdrawn - night sound
+                // and speech enhancement take the slots - so the row keeps its
+                // width without reserving anything.
+                visible: root.transportAvailable(roomRow.player)
                 color: !available ? root.disabledFg
                   : roomRow.player.loopState !== MprisLoopState.None
                     ? root.bar.foreground : root.offFg
@@ -2111,9 +2181,11 @@ BarWidget {
                 readonly property bool available: root.shuffleAvailable(roomRow.player)
 
                 text: root.glyphs.shuffle
-                // Held, not hidden - see transportAvailable.
-                opacity: root.transportAvailable(roomRow.player) ? 1 : 0
-                enabled: root.transportAvailable(roomRow.player)
+                // Collapsed, not held: unlike the three transport glyphs
+                // these two are replaced rather than withdrawn - night sound
+                // and speech enhancement take the slots - so the row keeps its
+                // width without reserving anything.
+                visible: root.transportAvailable(roomRow.player)
                 color: !available ? root.disabledFg
                   : roomRow.player.shuffle ? root.bar.foreground : root.offFg
                 font.family: root.bar.fontFamily
@@ -2125,6 +2197,52 @@ BarWidget {
                   anchors.margins: -Style.space(4)
                   cursorShape: shuffleButton.available ? Qt.PointingHandCursor : Qt.ArrowCursor
                   onClicked: root.toggleShuffle(roomRow.player)
+                }
+              }
+
+              // What the Sonos app offers a room on its TV input in place of
+              // play modes it cannot use. Only for a soundbar: `soundbarState`
+              // is undefined when the daemon sent no such key, and the button
+              // does not appear at all rather than appearing inert.
+              Repeater {
+                model: [
+                  { key: "nightMode", glyph: "nightSound", flag: "--night",
+                    tip: root.strings.tooltipNightSound },
+                  { key: "enhanceDialog", glyph: "speech", flag: "--dialog",
+                    tip: root.strings.tooltipSpeech },
+                ]
+                Text {
+                  id: soundbarButton
+                  required property var modelData
+                  // Not `state`: QQuickItem already has one, and shadowing it
+                  // is a rename away from a very confusing evening.
+                  readonly property var settingOn:
+                    root.soundbarState(roomRow.player, modelData.key)
+
+                  visible: !root.transportAvailable(roomRow.player)
+                    && settingOn !== undefined
+                  text: root.glyphs[modelData.glyph]
+                  color: settingOn === true ? root.bar.foreground : root.offFg
+                  font.family: root.bar.fontFamily
+                  font.pixelSize: Style.font.body
+                  anchors.verticalCenter: parent.verticalCenter
+
+                  MouseArea {
+                    id: soundbarMouse
+                    anchors.fill: parent
+                    anchors.margins: -Style.space(4)
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: root.toggleSoundbar(roomRow.player,
+                                                   soundbarButton.modelData.key,
+                                                   soundbarButton.modelData.flag)
+                  }
+
+                  PanelToolTip {
+                    visible: soundbarMouse.containsMouse && text !== ""
+                    text: soundbarButton.modelData.tip
+                    fontFamily: root.bar.fontFamily
+                  }
                 }
               }
 
