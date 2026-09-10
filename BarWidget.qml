@@ -1101,6 +1101,10 @@ BarWidget {
   function nudgeGroupingVolume(step) {
     if (!groupingIsMember(groupingIndex)) return
     var room = groupingRoomAt(groupingIndex)
+    // As the slider beside them is withdrawn on one: the CLI refuses the set,
+    // and a refusal leaves the optimistic level standing until the backstop
+    // clears it - taking every other room's pending level with it.
+    if (root.memberIsFixed(room)) return
     setRoomVolume(room, Math.max(0, Math.min(1, groupingLevelOf(room) + step)))
   }
 
@@ -2589,12 +2593,23 @@ BarWidget {
 
               Text {
                 id: volumeLabel
-                // The glyph stays put while a muted slider is dragged rather
-                // than turning into a number: the label sizes the slider beside
-                // it, so a text that changed width on press would resize the
-                // slider under the cursor and move the handle away from it. The
-                // handle is what shows the level being set; the number comes
-                // back with the room, the drag having unmuted it.
+                // One width for all three things this says - a percentage, the
+                // mute glyph, the fixed-volume word - because the slider beside
+                // it is sized from whatever this leaves, and a label that
+                // changed width would give each row a slider of its own length.
+                // The same reason the mode glyphs are held rather than
+                // collapsed; this is the other half of it. It also keeps the
+                // glyph from resizing the slider under the cursor when a muted
+                // one is pressed.
+                width: Math.max(volumeWidest.width, volumeMute.width, volumeFixed.width)
+                horizontalAlignment: Text.AlignRight
+                TextMetrics { id: volumeWidest; font: volumeLabel.font; text: "100" }
+                TextMetrics { id: volumeMute; font: volumeLabel.font; text: root.glyphs.mute }
+                TextMetrics {
+                  id: volumeFixed
+                  font: volumeLabel.font
+                  text: root.strings.fixedVolume
+                }
                 text: root.fixedVolume(roomRow.player)
                   ? root.strings.fixedVolume
                   : (root.isMuted(roomRow.player)
