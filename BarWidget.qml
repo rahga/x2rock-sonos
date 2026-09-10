@@ -771,22 +771,29 @@ BarWidget {
   }
 
   /// Whether the room is on its TV input; the format can be empty there too.
+  /// One of the daemon's namespaced boolean keys. `=== true` rather than a
+  /// truthy test on purpose: an absent key is "nothing to say about this
+  /// room", not "false", and the two differ for the soundbar settings.
+  function metaFlag(player, key) {
+    return !!(player && player.metadata && player.metadata[key] === true)
+  }
+
   function onTvInput(player) {
-    return !!(player && player.metadata && player.metadata["x2rock:onTvInput"] === true)
+    return root.metaFlag(player, "x2rock:onTvInput")
   }
 
   /// Whether this room is muted. Its MPRIS volume reads zero while it is - that
   /// is what is heard - so the flag is the only way to tell muted from turned
   /// down, and [`volumeLevelOf`] is the only way to see where it will come back.
   function isMuted(player) {
-    return !!(player && player.metadata && player.metadata["x2rock:muted"] === true)
+    return root.metaFlag(player, "x2rock:muted")
   }
 
   /// Whether this room's volume is set somewhere this cannot reach: line-level
   /// output into an amplifier. The CLI refuses a change on one and says to use
   /// the amplifier, so the slider comes off rather than sitting there inert.
   function fixedVolume(player) {
-    return !!(player && player.metadata && player.metadata["x2rock:fixedVolume"] === true)
+    return root.metaFlag(player, "x2rock:fixedVolume")
   }
 
   /// Where the slider sits.
@@ -814,11 +821,11 @@ BarWidget {
   /// own flags (`canPlay`, `canPause`, skip) all read false here too, but so do
   /// they on a room that is on its TV input, which has a source.
   function noSource(player) {
-    return !!(player && player.metadata && player.metadata["x2rock:noSource"] === true)
+    return root.metaFlag(player, "x2rock:noSource")
   }
 
   function hasTvInput(player) {
-    return !!(player && player.metadata && player.metadata["x2rock:hasTvInput"] === true)
+    return root.metaFlag(player, "x2rock:hasTvInput")
   }
 
   /// Whether what is playing is a live stream - internet radio, and anything
@@ -826,7 +833,7 @@ BarWidget {
   /// `=== true`, like the other flags: an older daemon sends no such key, and
   /// undefined must read as "no" rather than mark every room a station.
   function isLiveStream(player) {
-    return !!(player && player.metadata && player.metadata["x2rock:isLiveStream"] === true)
+    return root.metaFlag(player, "x2rock:isLiveStream")
   }
 
   /// The station behind a live stream, when the title is not already it.
@@ -1026,22 +1033,79 @@ BarWidget {
   /// The rooms grouped with the one being edited, found by membership rather
   /// than by name: grouping renames a group after its coordinator, so the
   /// player called "Kitchen" may not be there after the next change.
+  /// The player whose group is being edited, found once. Five things below
+  /// want it, and each used to walk `rooms` for itself - on every metadata
+  /// signal, which now includes every volume tick, and even with the panel
+  /// closed, where the scan can only end in nothing.
+  readonly property var groupingPlayer: {
+    if (groupingFor === "") return null
+    for (var i = 0; i < rooms.length; i++)
+      if (membersOf(rooms[i]).indexOf(groupingFor) !== -1) return rooms[i]
+    return null
+  }
+
   readonly property var groupingMembers: {
-    for (var i = 0; i < rooms.length; i++) {
-      var members = membersOf(rooms[i])
-      if (members.indexOf(groupingFor) !== -1) return members
-    }
+    var members = membersOf(groupingPlayer)
+    if (members.length) return members
     return groupingFor === "" ? [] : [groupingFor]
+  }
+
+  /// One width for all three things a volume label says - a percentage, the
+  /// mute glyph, the fixed-volume word - because the slider beside it is sized
+  /// from whatever the label leaves, and a label that changed width would give
+  /// each row a slider of its own length. The same reason the mode glyphs are
+  /// held rather than collapsed; this is the other half of it. It also keeps
+  /// the glyph from resizing the slider under the cursor when a muted one is
+  /// pressed.
+  ///
+  /// Measured once for the popup rather than per row: every row draws the same
+  /// three strings in the same font.
+  readonly property real volumeLabelWidth:
+    Math.max(volumeWidest.width, volumeMute.width, volumeFixed.width)
+  readonly property font volumeLabelFont: Qt.font({
+    family: root.bar ? root.bar.fontFamily : "",
+    pixelSize: Style.font.caption,
+  })
+  TextMetrics { id: volumeWidest; font: root.volumeLabelFont; text: "100" }
+  TextMetrics { id: volumeMute; font: root.volumeLabelFont; text: root.glyphs.mute }
+  TextMetrics { id: volumeFixed; font: root.volumeLabelFont; text: root.strings.fixedVolume }
+
+  /// How a volume reads, wherever one is drawn: the word where the level is
+  /// set on an amplifier this cannot reach, the glyph where the room is muted,
+  /// the percentage otherwise. Written once because the room rows and the
+  /// grouping panel's member rows both draw it, and two copies had already
+  /// drifted apart over which of them pinned its width.
+  function volumeCaption(fixed, muted, level) {
+    if (fixed) return root.strings.fixedVolume
+    return muted ? root.glyphs.mute : Math.round(level * 100)
+  }
+
+  /// And how its slider reads: gone where nothing can move it, dimmed where the
+  /// room is muted - still draggable there, since the set unmutes.
+  function volumeDim(fixed, muted) {
+    return fixed ? 0 : (muted ? 0.45 : 1)
+  }
+
+  /// One of the daemon's member-aligned arrays, or `[]` unless it pairs one for
+  /// one with the members - a half-published list would pair a level or a flag
+  /// with the wrong room, which is worse than showing none.
+  function memberArray(key) {
+    var list = groupingPlayer && groupingPlayer.metadata
+      ? groupingPlayer.metadata[key] : null
+    return list && list.length === groupingMembers.length ? list : []
+  }
+
+  /// A member-aligned array, read by room rather than by index.
+  function memberValue(list, room, fallback) {
+    var at = groupingMembers.indexOf(room)
+    return at >= 0 && list.length > at ? list[at] : fallback
   }
 
   /// The room whose player the group is: its identity, so the row that would
   /// have it "leave" its own group can be left out. Removing the coordinator is
   /// not something the CLI will do.
-  readonly property string groupingCoordinator: {
-    for (var i = 0; i < rooms.length; i++)
-      if (membersOf(rooms[i]).indexOf(groupingFor) !== -1) return rooms[i].identity || ""
-    return ""
-  }
+  readonly property string groupingCoordinator:
+    groupingPlayer ? (groupingPlayer.identity || "") : ""
 
   readonly property var groupingOthers: {
     var out = []
@@ -1092,8 +1156,7 @@ BarWidget {
   function groupingLevelOf(room) {
     var pending = root.pendingVolumes[room]
     if (pending !== undefined) return pending
-    var at = groupingMembers.indexOf(room)
-    return at >= 0 && groupingVolumes.length > at ? groupingVolumes[at] / 100 : 0
+    return memberValue(groupingVolumes, room, 0) / 100
   }
 
   // The same 2% step the scroll gesture and the popup's arrows use. Only
@@ -1101,10 +1164,6 @@ BarWidget {
   function nudgeGroupingVolume(step) {
     if (!groupingIsMember(groupingIndex)) return
     var room = groupingRoomAt(groupingIndex)
-    // As the slider beside them is withdrawn on one: the CLI refuses the set,
-    // and a refusal leaves the optimistic level standing until the backstop
-    // clears it - taking every other room's pending level with it.
-    if (root.memberIsFixed(room)) return
     setRoomVolume(room, Math.max(0, Math.min(1, groupingLevelOf(room) + step)))
   }
 
@@ -1140,67 +1199,37 @@ BarWidget {
   /// Each grouped room's own volume, aligned with groupingMembers. Published
   /// by the daemon off playerVolume events, so these follow someone turning a
   /// speaker up from the Sonos app rather than needing a re-read.
+  /// Each grouped room's own level. The levels regardless of mute where the
+  /// daemon sends them, since a muted member's heard volume is zero and its
+  /// handle belongs where it will come back; the mute-zeroed list is the
+  /// fallback for an older daemon. Decimal strings, not numbers: see the
+  /// daemon's note on why an array of ints does not survive the trip into QML.
   readonly property var groupingVolumes: {
-    for (var i = 0; i < rooms.length; i++) {
-      var members = membersOf(rooms[i])
-      if (members.indexOf(groupingFor) === -1) continue
-      // The levels regardless of mute where the daemon sends them, since a
-      // muted member's heard volume is zero and its handle belongs where it
-      // will come back; memberVolumes is the fallback for an older daemon.
-      var levels = rooms[i].metadata ? rooms[i].metadata["x2rock:memberVolumeLevels"] : null
-      if (!levels || levels.length !== members.length)
-        levels = rooms[i].metadata ? rooms[i].metadata["x2rock:memberVolumes"] : null
-      // Decimal strings, not numbers: see the daemon's note on why an array of
-      // ints does not survive the trip into QML.
-      if (!levels || levels.length !== members.length) return []
-      var out = []
-      for (var j = 0; j < levels.length; j++) out.push(Number(levels[j]) || 0)
-      return out
-    }
-    return []
+    var levels = memberArray("x2rock:memberVolumeLevels")
+    if (!levels.length) levels = memberArray("x2rock:memberVolumes")
+    return levels.map(function (level) { return Number(level) || 0 })
   }
 
-  /// Each grouped room's mute, aligned with groupingMembers as the levels are.
-  /// Same shape and same reason: the flag is the only thing that tells a muted
-  /// member from one that is turned down.
-  readonly property var groupingMuted: {
-    for (var i = 0; i < rooms.length; i++) {
-      var members = membersOf(rooms[i])
-      if (members.indexOf(groupingFor) === -1) continue
-      var flags = rooms[i].metadata ? rooms[i].metadata["x2rock:memberMuted"] : null
-      if (!flags || flags.length !== members.length) return []
-      var out = []
-      for (var j = 0; j < flags.length; j++) out.push(String(flags[j]) === "true")
-      return out
-    }
-    return []
+  /// Each grouped room's mute, and its fixed-volume flag, aligned with the
+  /// members as the levels are. Sent as strings for the same reason.
+  ///
+  /// Mute is the only thing that tells a muted member from one turned down. A
+  /// fixed volume is a Port feeding an amplifier, which the CLI refuses to set
+  /// - so a live slider there would hold the handle where it was dropped until
+  /// the pending backstop gave up, then snap back.
+  function memberFlags(key) {
+    return memberArray(key).map(function (flag) { return String(flag) === "true" })
   }
+
+  readonly property var groupingMuted: memberFlags("x2rock:memberMuted")
+  readonly property var groupingFixed: memberFlags("x2rock:memberFixedVolume")
 
   function memberIsMuted(room) {
-    var at = groupingMembers.indexOf(room)
-    return at >= 0 && groupingMuted.length > at ? groupingMuted[at] : false
-  }
-
-  /// Each grouped room's fixed-volume flag, read the same way. A Port feeding
-  /// an amplifier has no level to set from here, and the CLI refuses `vol
-  /// --player` on one - so a live slider there would hold the handle where it
-  /// was dropped until the pending backstop gave up, then snap back.
-  readonly property var groupingFixed: {
-    for (var i = 0; i < rooms.length; i++) {
-      var members = membersOf(rooms[i])
-      if (members.indexOf(groupingFor) === -1) continue
-      var flags = rooms[i].metadata ? rooms[i].metadata["x2rock:memberFixedVolume"] : null
-      if (!flags || flags.length !== members.length) return []
-      var out = []
-      for (var j = 0; j < flags.length; j++) out.push(String(flags[j]) === "true")
-      return out
-    }
-    return []
+    return memberValue(groupingMuted, room, false)
   }
 
   function memberIsFixed(room) {
-    var at = groupingMembers.indexOf(room)
-    return at >= 0 && groupingFixed.length > at ? groupingFixed[at] : false
+    return memberValue(groupingFixed, room, false)
   }
 
   // What a slider was just dragged to, per room, until the player confirms it.
@@ -1271,6 +1300,12 @@ BarWidget {
   /// One room's own level, not the group's. Absolute, because a slider knows
   /// where it is - the same reasoning as the popup's group slider.
   function setRoomVolume(room, level) {
+    // The one place a member's level is staged and sent, so the one place the
+    // refusal has to be known: the CLI will not set a fixed volume, and a
+    // refusal leaves the optimistic level standing until the backstop clears
+    // it - taking every other room's pending level with it. The sliders and
+    // the arrow keys withdraw themselves as the visible half of this.
+    if (root.memberIsFixed(room)) return
     // A fresh object, not the same one mutated: assigning an unchanged
     // reference back does not count as a change in QML, so the sliders would
     // never see it and would snap to the old level while the command was still
@@ -2074,6 +2109,21 @@ BarWidget {
             id: roomRow
             required property var modelData
             readonly property var player: modelData
+            // Read once per row rather than in each binding below. Every one of
+            // these goes through `player.metadata`, and a metadata read hands
+            // QML the whole map afresh - which now happens on every volume
+            // tick, since the daemon announces the level with it.
+            readonly property bool muted: root.isMuted(roomRow.player)
+            readonly property bool fixedVolume: root.fixedVolume(roomRow.player)
+            readonly property real level: root.volumeLevelOf(roomRow.player)
+            // Repeat and shuffle collapse only where something takes their two
+            // slots: on TV input the soundbar's night sound and speech
+            // enhancement do, so reserving space there would leave two gaps.
+            // With no source at all nothing replaces them, so they are held
+            // blank the way the transport glyphs are - otherwise the slider on
+            // that one row grows by two glyphs and no two rows line up.
+            readonly property bool modesReplaced: root.onTvInput(roomRow.player)
+            readonly property bool modesBlank: root.noSource(roomRow.player)
 
             width: column.width
             spacing: Style.space(4)
@@ -2420,15 +2470,10 @@ BarWidget {
                 readonly property bool available: root.repeatAvailable(roomRow.player)
 
                 text: roomRow.player.loopState === MprisLoopState.Track ? root.glyphs.repeatOne : root.glyphs.repeat
-                // Collapsed only where something takes the slots: on TV input
-                // the soundbar's night sound and speech enhancement do, so
-                // reserving space there would leave two gaps. With no source
-                // at all nothing replaces them, so they are held blank the way
-                // the transport glyphs are - otherwise the slider on that one
-                // row grows by two glyphs and no two rows line up.
-                visible: !root.onTvInput(roomRow.player)
-                opacity: root.noSource(roomRow.player) ? 0 : 1
-                enabled: !root.noSource(roomRow.player)
+                // See roomRow.modesReplaced.
+                visible: !roomRow.modesReplaced
+                opacity: roomRow.modesBlank ? 0 : 1
+                enabled: !roomRow.modesBlank
                 color: !available ? root.disabledFg
                   : roomRow.player.loopState !== MprisLoopState.None
                     ? root.bar.foreground : root.offFg
@@ -2449,15 +2494,10 @@ BarWidget {
                 readonly property bool available: root.shuffleAvailable(roomRow.player)
 
                 text: root.glyphs.shuffle
-                // Collapsed only where something takes the slots: on TV input
-                // the soundbar's night sound and speech enhancement do, so
-                // reserving space there would leave two gaps. With no source
-                // at all nothing replaces them, so they are held blank the way
-                // the transport glyphs are - otherwise the slider on that one
-                // row grows by two glyphs and no two rows line up.
-                visible: !root.onTvInput(roomRow.player)
-                opacity: root.noSource(roomRow.player) ? 0 : 1
-                enabled: !root.noSource(roomRow.player)
+                // See roomRow.modesReplaced.
+                visible: !roomRow.modesReplaced
+                opacity: roomRow.modesBlank ? 0 : 1
+                enabled: !roomRow.modesBlank
                 color: !available ? root.disabledFg
                   : roomRow.player.shuffle ? root.bar.foreground : root.offFg
                 font.family: root.bar.fontFamily
@@ -2574,14 +2614,13 @@ BarWidget {
                 step: 0.01
                 // The level regardless of mute, so a muted room's handle stays
                 // where the room will come back rather than dropping to zero.
-                value: root.volumeLevelOf(roomRow.player)
+                value: roomRow.level
                 // Dimmed while muted and withdrawn on a fixed volume - held,
                 // not hidden, the way the transport glyphs are, so nothing in
                 // the row moves. Dragging a dimmed one is still allowed and
                 // unmutes, which is what the Sonos app's slider does.
-                opacity: root.fixedVolume(roomRow.player)
-                  ? 0 : (root.isMuted(roomRow.player) ? 0.45 : 1)
-                enabled: !root.fixedVolume(roomRow.player)
+                opacity: root.volumeDim(roomRow.fixedVolume, roomRow.muted)
+                enabled: !roomRow.fixedVolume
                 // A slider has a known position, so absolute volume is the right
                 // semantic (Sonos's own guidance); set only on release so a drag
                 // is one command, not a stream of them.
@@ -2593,30 +2632,11 @@ BarWidget {
 
               Text {
                 id: volumeLabel
-                // One width for all three things this says - a percentage, the
-                // mute glyph, the fixed-volume word - because the slider beside
-                // it is sized from whatever this leaves, and a label that
-                // changed width would give each row a slider of its own length.
-                // The same reason the mode glyphs are held rather than
-                // collapsed; this is the other half of it. It also keeps the
-                // glyph from resizing the slider under the cursor when a muted
-                // one is pressed.
-                width: Math.max(volumeWidest.width, volumeMute.width, volumeFixed.width)
+                // See root.volumeLabelWidth.
+                width: root.volumeLabelWidth
                 horizontalAlignment: Text.AlignRight
-                TextMetrics { id: volumeWidest; font: volumeLabel.font; text: "100" }
-                TextMetrics { id: volumeMute; font: volumeLabel.font; text: root.glyphs.mute }
-                TextMetrics {
-                  id: volumeFixed
-                  font: volumeLabel.font
-                  text: root.strings.fixedVolume
-                }
-                text: root.fixedVolume(roomRow.player)
-                  ? root.strings.fixedVolume
-                  : (root.isMuted(roomRow.player)
-                    ? root.glyphs.mute
-                    : Math.round((volumeSlider.dragging
-                      ? volumeSlider.liveValue
-                      : root.volumeLevelOf(roomRow.player)) * 100))
+                text: root.volumeCaption(roomRow.fixedVolume, roomRow.muted,
+                  volumeSlider.dragging ? volumeSlider.liveValue : roomRow.level)
                 color: root.secondaryFg
                 font.family: root.bar.fontFamily
                 font.pixelSize: Style.font.caption
@@ -3253,6 +3273,8 @@ BarWidget {
             required property var modelData
             required property int index
             readonly property real level: root.groupingLevelOf(memberRow.modelData)
+            readonly property bool muted: root.memberIsMuted(memberRow.modelData)
+            readonly property bool fixedVolume: root.memberIsFixed(memberRow.modelData)
             readonly property bool selected: root.groupingIndex === memberRow.index
             // Hovering moves the cursor rather than lighting a second one.
             readonly property bool hovered: volumeHover.hovered || leaveArea.containsMouse
@@ -3327,9 +3349,8 @@ BarWidget {
               // Dimmed while that speaker is muted, as the room row's is, and
               // still draggable: the set unmutes it. Withdrawn entirely on a
               // fixed volume, which no set can move.
-              opacity: root.memberIsFixed(memberRow.modelData)
-                ? 0 : (root.memberIsMuted(memberRow.modelData) ? 0.45 : 1)
-              enabled: !root.memberIsFixed(memberRow.modelData)
+              opacity: root.volumeDim(memberRow.fixedVolume, memberRow.muted)
+              enabled: !memberRow.fixedVolume
               onReleased: function(v) { root.setRoomVolume(memberRow.modelData, v) }
 
               // A handler rather than PanelSlider's own `_hot`: that is
@@ -3341,12 +3362,8 @@ BarWidget {
               anchors.verticalCenter: memberVolume.verticalCenter
               anchors.right: parent.right
               anchors.rightMargin: Style.space(8)
-              text: root.memberIsFixed(memberRow.modelData)
-                ? root.strings.fixedVolume
-                : (root.memberIsMuted(memberRow.modelData)
-                  ? root.glyphs.mute
-                  : Math.round((memberVolume.dragging ? memberVolume.liveValue
-                                                      : memberRow.level) * 100))
+              text: root.volumeCaption(memberRow.fixedVolume, memberRow.muted,
+                memberVolume.dragging ? memberVolume.liveValue : memberRow.level)
               color: root.secondaryFg
               font.family: root.bar.fontFamily
               font.pixelSize: Style.font.caption
