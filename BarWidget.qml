@@ -775,6 +775,32 @@ BarWidget {
     return !!(player && player.metadata && player.metadata["x2rock:onTvInput"] === true)
   }
 
+  /// Whether this room is muted. Its MPRIS volume reads zero while it is - that
+  /// is what is heard - so the flag is the only way to tell muted from turned
+  /// down, and [`volumeLevelOf`] is the only way to see where it will come back.
+  function isMuted(player) {
+    return !!(player && player.metadata && player.metadata["x2rock:muted"] === true)
+  }
+
+  /// Whether this room's volume is set somewhere this cannot reach: line-level
+  /// output into an amplifier. The CLI refuses a change on one and says to use
+  /// the amplifier, so the slider comes off rather than sitting there inert.
+  function fixedVolume(player) {
+    return !!(player && player.metadata && player.metadata["x2rock:fixedVolume"] === true)
+  }
+
+  /// Where the slider sits: the level the daemon publishes regardless of mute,
+  /// falling back to the heard volume for a daemon too old to publish it.
+  function volumeLevelOf(player) {
+    if (!player) return 0
+    var published = player.metadata ? player.metadata["x2rock:volumeLevel"] : undefined
+    if (published !== undefined && published !== null && String(published) !== "") {
+      var level = Number(published)
+      if (!isNaN(level)) return Math.max(0, Math.min(1, level / 100))
+    }
+    return player.volumeSupported ? player.volume : 0
+  }
+
   /// Whether the room has nothing loaded at all - the Sonos app's "No Content":
   /// no current item, no container, a queue that was cleared. The daemon says so
   /// with one key, because only it can see that there is no item; the player's
@@ -1107,7 +1133,12 @@ BarWidget {
     for (var i = 0; i < rooms.length; i++) {
       var members = membersOf(rooms[i])
       if (members.indexOf(groupingFor) === -1) continue
-      var levels = rooms[i].metadata ? rooms[i].metadata["x2rock:memberVolumes"] : null
+      // The levels regardless of mute where the daemon sends them, since a
+      // muted member's heard volume is zero and its handle belongs where it
+      // will come back; memberVolumes is the fallback for an older daemon.
+      var levels = rooms[i].metadata ? rooms[i].metadata["x2rock:memberVolumeLevels"] : null
+      if (!levels || levels.length !== members.length)
+        levels = rooms[i].metadata ? rooms[i].metadata["x2rock:memberVolumes"] : null
       // Decimal strings, not numbers: see the daemon's note on why an array of
       // ints does not survive the trip into QML.
       if (!levels || levels.length !== members.length) return []
@@ -1116,6 +1147,27 @@ BarWidget {
       return out
     }
     return []
+  }
+
+  /// Each grouped room's mute, aligned with groupingMembers as the levels are.
+  /// Same shape and same reason: the flag is the only thing that tells a muted
+  /// member from one that is turned down.
+  readonly property var groupingMuted: {
+    for (var i = 0; i < rooms.length; i++) {
+      var members = membersOf(rooms[i])
+      if (members.indexOf(groupingFor) === -1) continue
+      var flags = rooms[i].metadata ? rooms[i].metadata["x2rock:memberMuted"] : null
+      if (!flags || flags.length !== members.length) return []
+      var out = []
+      for (var j = 0; j < flags.length; j++) out.push(String(flags[j]) === "true")
+      return out
+    }
+    return []
+  }
+
+  function memberIsMuted(room) {
+    var at = groupingMembers.indexOf(room)
+    return at >= 0 && groupingMuted.length > at ? groupingMuted[at] : false
   }
 
   // What a slider was just dragged to, per room, until the player confirms it.
@@ -1407,6 +1459,11 @@ BarWidget {
     // nf-md-weather_night (U+F0594) and nf-md-account_voice (U+F05CB).
     "nightSound": "󰖔",
     "speech": "󰗋",
+    // Beside a muted room's slider, where its percentage would be. The Sonos
+    // app dims the slider and marks it rather than dropping it to zero, so the
+    // level the room comes back at stays readable. nf-md-volume_mute (U+F075F),
+    // the same Material Design set as the rest.
+    "mute": "󰝟",
     // The button that opens the picker. Named `music` rather than `favorites`
     // because the picker stopped being only favorites: it is the household's
     // favorites, this machine's kept items, a service's own containers and a
@@ -1500,6 +1557,10 @@ BarWidget {
   readonly property var defaultStrings: ({
     "playing": "playing",
     "paused": "paused",
+    // Where a percentage would be on a room whose volume is set elsewhere -
+    // line-level output into an amplifier, a Port. Short: it shares the row
+    // with the name and the buttons.
+    "fixedVolume": "fixed",
     "loading": "Loading…",
     "filterHint": "Type to filter",
     "noMatch": "No match",
@@ -2456,7 +2517,16 @@ BarWidget {
                 minimum: 0
                 maximum: 1
                 step: 0.01
-                value: roomRow.player.volumeSupported ? roomRow.player.volume : 0
+                // The level regardless of mute, so a muted room's handle stays
+                // where the room will come back rather than dropping to zero.
+                value: root.volumeLevelOf(roomRow.player)
+                // Dimmed while muted and withdrawn on a fixed volume - held,
+                // not hidden, the way the transport glyphs are, so nothing in
+                // the row moves. Dragging a dimmed one is still allowed and
+                // unmutes, which is what the Sonos app's slider does.
+                opacity: root.fixedVolume(roomRow.player)
+                  ? 0 : (root.isMuted(roomRow.player) ? 0.45 : 1)
+                enabled: !root.fixedVolume(roomRow.player)
                 // A slider has a known position, so absolute volume is the right
                 // semantic (Sonos's own guidance); set only on release so a drag
                 // is one command, not a stream of them.
@@ -2468,9 +2538,13 @@ BarWidget {
 
               Text {
                 id: volumeLabel
-                text: Math.round((volumeSlider.dragging
-                  ? volumeSlider.liveValue
-                  : (roomRow.player.volumeSupported ? roomRow.player.volume : 0)) * 100)
+                text: root.fixedVolume(roomRow.player)
+                  ? root.strings.fixedVolume
+                  : (root.isMuted(roomRow.player) && !volumeSlider.dragging
+                    ? root.glyphs.mute
+                    : Math.round((volumeSlider.dragging
+                      ? volumeSlider.liveValue
+                      : root.volumeLevelOf(roomRow.player)) * 100))
                 color: root.secondaryFg
                 font.family: root.bar.fontFamily
                 font.pixelSize: Style.font.caption
@@ -3178,6 +3252,9 @@ BarWidget {
               maximum: 1
               step: 0.01
               value: memberRow.level
+              // Dimmed while that speaker is muted, as the room row's is, and
+              // still draggable: the set unmutes it.
+              opacity: root.memberIsMuted(memberRow.modelData) ? 0.45 : 1
               onReleased: function(v) { root.setRoomVolume(memberRow.modelData, v) }
 
               // A handler rather than PanelSlider's own `_hot`: that is
@@ -3189,8 +3266,10 @@ BarWidget {
               anchors.verticalCenter: memberVolume.verticalCenter
               anchors.right: parent.right
               anchors.rightMargin: Style.space(8)
-              text: Math.round((memberVolume.dragging ? memberVolume.liveValue
-                                                      : memberRow.level) * 100)
+              text: root.memberIsMuted(memberRow.modelData) && !memberVolume.dragging
+                ? root.glyphs.mute
+                : Math.round((memberVolume.dragging ? memberVolume.liveValue
+                                                    : memberRow.level) * 100)
               color: root.secondaryFg
               font.family: root.bar.fontFamily
               font.pixelSize: Style.font.caption

@@ -75,6 +75,7 @@ which is an ordinary Unicode character. Override any subset:
 | `repeat` | `󰑖` | Room row, off or repeating the queue |
 | `repeatOne` | `󰑘` | Room row, repeating one track |
 | `shuffle` | `󰒝` | Room row |
+| `mute` | `󰝟` | Where a muted room's percentage would be, beside its dimmed slider |
 | `music` | `󰝚` | Opens that room's music picker — favorites, kept items, browsing and search |
 | `group` | `󰌷` | Opens that room's grouping panel |
 | `ungroup` | `󰌸` | Sends one room back out on its own |
@@ -116,6 +117,7 @@ Anything the bar's font can draw works, including plain text — `"music":
 | Key | Default |
 |---|---|
 | `playing` / `paused` | `playing` / `paused` — beside each room name |
+| `fixedVolume` | `fixed` — in place of the percentage on a room whose volume is set on an amplifier |
 | `loading` | `Loading…` |
 | `filterHint` | `Type to filter` — the picker's filter placeholder. Filters favorites and kept items, and whatever container is open |
 | `noMatch` | `No match` |
