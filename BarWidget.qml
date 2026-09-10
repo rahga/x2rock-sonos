@@ -789,10 +789,17 @@ BarWidget {
     return !!(player && player.metadata && player.metadata["x2rock:fixedVolume"] === true)
   }
 
-  /// Where the slider sits: the level the daemon publishes regardless of mute,
-  /// falling back to the heard volume for a daemon too old to publish it.
+  /// Where the slider sits.
+  ///
+  /// The heard volume, which is the canonical MPRIS property and is announced
+  /// on every change - except under mute, where it reads zero by design and the
+  /// published level is the only thing that says where the room will come back.
+  /// Reading the published level always would work only as long as the daemon
+  /// announces it on every change, and a slider that trusts a metadata key to
+  /// track a property is one release away from sitting still.
   function volumeLevelOf(player) {
     if (!player) return 0
+    if (!root.isMuted(player)) return player.volumeSupported ? player.volume : 0
     var published = player.metadata ? player.metadata["x2rock:volumeLevel"] : undefined
     if (published !== undefined && published !== null && String(published) !== "") {
       var level = Number(published)
@@ -1168,6 +1175,28 @@ BarWidget {
   function memberIsMuted(room) {
     var at = groupingMembers.indexOf(room)
     return at >= 0 && groupingMuted.length > at ? groupingMuted[at] : false
+  }
+
+  /// Each grouped room's fixed-volume flag, read the same way. A Port feeding
+  /// an amplifier has no level to set from here, and the CLI refuses `vol
+  /// --player` on one - so a live slider there would hold the handle where it
+  /// was dropped until the pending backstop gave up, then snap back.
+  readonly property var groupingFixed: {
+    for (var i = 0; i < rooms.length; i++) {
+      var members = membersOf(rooms[i])
+      if (members.indexOf(groupingFor) === -1) continue
+      var flags = rooms[i].metadata ? rooms[i].metadata["x2rock:memberFixedVolume"] : null
+      if (!flags || flags.length !== members.length) return []
+      var out = []
+      for (var j = 0; j < flags.length; j++) out.push(String(flags[j]) === "true")
+      return out
+    }
+    return []
+  }
+
+  function memberIsFixed(room) {
+    var at = groupingMembers.indexOf(room)
+    return at >= 0 && groupingFixed.length > at ? groupingFixed[at] : false
   }
 
   // What a slider was just dragged to, per room, until the player confirms it.
@@ -1747,7 +1776,11 @@ BarWidget {
   }
 
   function nudgeVolume(player, ticks) {
-    if (!player) return
+    // Nothing here can move a level set on an amplifier, and the CLI this ends
+    // up calling refuses it in as many words - into a `bar.run` whose output
+    // nobody reads. The slider is already withdrawn on such a room; the scroll
+    // gesture and the popup's volume keys reach it without one.
+    if (!player || root.fixedVolume(player)) return
     root.focusedName = player.identity
     root.pendingVolumeDelta += ticks * 2
     volumeTimer.restart()
@@ -2457,8 +2490,15 @@ BarWidget {
                   // TV input specifically, not "no transport": a soundbar
                   // whose queue is empty has no transport either, and these
                   // two are the TV input's substitution, not an empty room's.
+                  //
+                  // Held blank rather than dropped where the daemon has said
+                  // nothing about a setting - the seed read can fail, and a
+                  // firmware can answer with one of the two - because these
+                  // stand in the slots repeat and shuffle vacate, and a row
+                  // short of one would grow its slider by a glyph.
                   visible: root.onTvInput(roomRow.player)
-                    && settingOn !== undefined
+                  opacity: settingOn !== undefined ? 1 : 0
+                  enabled: settingOn !== undefined
                   text: root.glyphs[modelData.glyph]
                   color: settingOn === true ? root.bar.foreground : root.offFg
                   font.family: root.bar.fontFamily
@@ -2549,9 +2589,15 @@ BarWidget {
 
               Text {
                 id: volumeLabel
+                // The glyph stays put while a muted slider is dragged rather
+                // than turning into a number: the label sizes the slider beside
+                // it, so a text that changed width on press would resize the
+                // slider under the cursor and move the handle away from it. The
+                // handle is what shows the level being set; the number comes
+                // back with the room, the drag having unmuted it.
                 text: root.fixedVolume(roomRow.player)
                   ? root.strings.fixedVolume
-                  : (root.isMuted(roomRow.player) && !volumeSlider.dragging
+                  : (root.isMuted(roomRow.player)
                     ? root.glyphs.mute
                     : Math.round((volumeSlider.dragging
                       ? volumeSlider.liveValue
@@ -3264,8 +3310,11 @@ BarWidget {
               step: 0.01
               value: memberRow.level
               // Dimmed while that speaker is muted, as the room row's is, and
-              // still draggable: the set unmutes it.
-              opacity: root.memberIsMuted(memberRow.modelData) ? 0.45 : 1
+              // still draggable: the set unmutes it. Withdrawn entirely on a
+              // fixed volume, which no set can move.
+              opacity: root.memberIsFixed(memberRow.modelData)
+                ? 0 : (root.memberIsMuted(memberRow.modelData) ? 0.45 : 1)
+              enabled: !root.memberIsFixed(memberRow.modelData)
               onReleased: function(v) { root.setRoomVolume(memberRow.modelData, v) }
 
               // A handler rather than PanelSlider's own `_hot`: that is
@@ -3277,10 +3326,12 @@ BarWidget {
               anchors.verticalCenter: memberVolume.verticalCenter
               anchors.right: parent.right
               anchors.rightMargin: Style.space(8)
-              text: root.memberIsMuted(memberRow.modelData) && !memberVolume.dragging
-                ? root.glyphs.mute
-                : Math.round((memberVolume.dragging ? memberVolume.liveValue
-                                                    : memberRow.level) * 100)
+              text: root.memberIsFixed(memberRow.modelData)
+                ? root.strings.fixedVolume
+                : (root.memberIsMuted(memberRow.modelData)
+                  ? root.glyphs.mute
+                  : Math.round((memberVolume.dragging ? memberVolume.liveValue
+                                                      : memberRow.level) * 100))
               color: root.secondaryFg
               font.family: root.bar.fontFamily
               font.pixelSize: Style.font.caption
