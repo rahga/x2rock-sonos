@@ -2383,11 +2383,15 @@ BarWidget {
                 readonly property bool available: root.repeatAvailable(roomRow.player)
 
                 text: roomRow.player.loopState === MprisLoopState.Track ? root.glyphs.repeatOne : root.glyphs.repeat
-                // Collapsed, not held: unlike the three transport glyphs
-                // these two are replaced rather than withdrawn - night sound
-                // and speech enhancement take the slots - so the row keeps its
-                // width without reserving anything.
-                visible: root.transportAvailable(roomRow.player)
+                // Collapsed only where something takes the slots: on TV input
+                // the soundbar's night sound and speech enhancement do, so
+                // reserving space there would leave two gaps. With no source
+                // at all nothing replaces them, so they are held blank the way
+                // the transport glyphs are - otherwise the slider on that one
+                // row grows by two glyphs and no two rows line up.
+                visible: !root.onTvInput(roomRow.player)
+                opacity: root.noSource(roomRow.player) ? 0 : 1
+                enabled: !root.noSource(roomRow.player)
                 color: !available ? root.disabledFg
                   : roomRow.player.loopState !== MprisLoopState.None
                     ? root.bar.foreground : root.offFg
@@ -2408,11 +2412,15 @@ BarWidget {
                 readonly property bool available: root.shuffleAvailable(roomRow.player)
 
                 text: root.glyphs.shuffle
-                // Collapsed, not held: unlike the three transport glyphs
-                // these two are replaced rather than withdrawn - night sound
-                // and speech enhancement take the slots - so the row keeps its
-                // width without reserving anything.
-                visible: root.transportAvailable(roomRow.player)
+                // Collapsed only where something takes the slots: on TV input
+                // the soundbar's night sound and speech enhancement do, so
+                // reserving space there would leave two gaps. With no source
+                // at all nothing replaces them, so they are held blank the way
+                // the transport glyphs are - otherwise the slider on that one
+                // row grows by two glyphs and no two rows line up.
+                visible: !root.onTvInput(roomRow.player)
+                opacity: root.noSource(roomRow.player) ? 0 : 1
+                enabled: !root.noSource(roomRow.player)
                 color: !available ? root.disabledFg
                   : roomRow.player.shuffle ? root.bar.foreground : root.offFg
                 font.family: root.bar.fontFamily
@@ -2446,7 +2454,10 @@ BarWidget {
                   readonly property var settingOn:
                     root.soundbarState(roomRow.player, modelData.key)
 
-                  visible: !root.transportAvailable(roomRow.player)
+                  // TV input specifically, not "no transport": a soundbar
+                  // whose queue is empty has no transport either, and these
+                  // two are the TV input's substitution, not an empty room's.
+                  visible: root.onTvInput(roomRow.player)
                     && settingOn !== undefined
                   text: root.glyphs[modelData.glyph]
                   color: settingOn === true ? root.bar.foreground : root.offFg
