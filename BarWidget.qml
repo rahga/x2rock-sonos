@@ -1000,10 +1000,14 @@ BarWidget {
     }
   }
 
-  function rateTrack(room, up) {
+  function rateTrack(player, up) {
+    // Takes the player, not its name, so it can gate the way togglePlay does:
+    // on TV input or with no source the thumbs are hidden with the transport,
+    // and the u/d keys must not reach past that to spawn a `rate` that fails.
+    if (!player || !root.transportAvailable(player)) return
     if (rateProc.running) return
-    root.focusedName = room
-    rateProc.command = [root.command, "rate", up ? "up" : "down", "-r", room]
+    root.focusedName = player.identity
+    rateProc.command = [root.command, "rate", up ? "up" : "down", "-r", player.identity]
     rateProc.running = true
   }
 
@@ -2125,9 +2129,9 @@ BarWidget {
           } else if (event.key === Qt.Key_T) {
             if (root.hasTvInput(player)) root.switchToTv(player.identity)
           } else if (event.key === Qt.Key_U) {
-            if (player) root.rateTrack(player.identity, true)
+            root.rateTrack(player, true)
           } else if (event.key === Qt.Key_D) {
-            if (player) root.rateTrack(player.identity, false)
+            root.rateTrack(player, false)
           } else {
             return
           }
@@ -2519,7 +2523,7 @@ BarWidget {
                   anchors.fill: parent
                   anchors.margins: -Style.space(4)
                   cursorShape: Qt.PointingHandCursor
-                  onClicked: root.rateTrack(roomRow.player.identity, true)
+                  onClicked: root.rateTrack(roomRow.player, true)
                 }
               }
 
@@ -2536,7 +2540,7 @@ BarWidget {
                   anchors.fill: parent
                   anchors.margins: -Style.space(4)
                   cursorShape: Qt.PointingHandCursor
-                  onClicked: root.rateTrack(roomRow.player.identity, false)
+                  onClicked: root.rateTrack(roomRow.player, false)
                 }
               }
 
