@@ -76,7 +76,7 @@ which is an ordinary Unicode character. Override any subset:
 | `repeat` | `󰑖` | Room row, off or repeating the queue |
 | `repeatOne` | `󰑘` | Room row, repeating one track |
 | `shuffle` | `󰒝` | Room row |
-| `thumbsUp` / `thumbsDown` | `󰔓` / `󰔑` | Room row — rate the current track, where the service offers it (a Pandora-shaped radio feature; never a Live broadcast). Shown alongside transport regardless, since knowing whether a given track can be rated needs the same round trip pressing the button does |
+| `thumbsUp` / `thumbsDown` | `󰔓` / `󰔑` | Room row — rate the current track, where the service offers it (a Pandora-shaped radio feature; never a Live broadcast). Shown only where the daemon reports a real track id (`x2rock:hasTrackId`) — so not on a live stream, a `play-url` stream or the TV input, where a thumb could only fail. Whether the *service* publishes ratings is still unknowable without the round trip pressing the button pays for, so a thumb can still fail on Spotify |
 | `mute` | `󰝟` | Where a muted room's percentage would be, beside its dimmed slider |
 | `music` | `󰝚` | Opens that room's music picker — favorites, kept items, browsing and search |
 | `group` | `󰌷` | Opens that room's grouping panel |

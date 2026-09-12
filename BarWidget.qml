@@ -832,6 +832,17 @@ BarWidget {
   /// else the player resolves continuously rather than as an item. Strictly
   /// `=== true`, like the other flags: an older daemon sends no such key, and
   /// undefined must read as "no" rather than mark every room a station.
+  // Whether the thumbs mean anything on this row. The daemon publishes whether
+  // the current item carries a real service track id - the CLI's own first
+  // gate for `rate`, and the one thing about rateability that is knowable on
+  // the LAN: a Live broadcast, a play-url stream and the TV input have no id
+  // at all. What it cannot say is whether the *service* publishes ratings, so
+  // a thumb can still fail on Spotify; that answer costs the internet round
+  // trip pressing the button already pays for.
+  function rateable(player) {
+    return root.transportAvailable(player) && root.metaFlag(player, "x2rock:hasTrackId")
+  }
+
   function isLiveStream(player) {
     return root.metaFlag(player, "x2rock:isLiveStream")
   }
@@ -1001,10 +1012,10 @@ BarWidget {
   }
 
   function rateTrack(player, up) {
-    // Takes the player, not its name, so it can gate the way togglePlay does:
-    // on TV input or with no source the thumbs are hidden with the transport,
-    // and the u/d keys must not reach past that to spawn a `rate` that fails.
-    if (!player || !root.transportAvailable(player)) return
+    // Takes the player, not its name, so it can gate the way togglePlay does,
+    // and on the same thing the thumbs themselves are shown by: the u/d keys
+    // must not reach past a hidden thumb to spawn a `rate` that fails.
+    if (!root.rateable(player)) return
     if (rateProc.running) return
     root.focusedName = player.identity
     rateProc.command = [root.command, "rate", up ? "up" : "down", "-r", player.identity]
@@ -2505,15 +2516,13 @@ BarWidget {
                 }
               }
 
-              // Whether the current track can actually be rated is a SMAPI
-              // question this widget cannot answer without the round trip
-              // pressing the button already pays for - see rateTrack. So these
-              // are held to the same gate as play/pause/skip, not to whether
-              // this particular track is one of the few that support it.
+              // Shown where the daemon says there is a track id to rate - see
+              // root.rateable - rather than wherever the transport is: a live
+              // stream or the TV input has thumbs that could only ever fail.
               Text {
                 text: root.glyphs.thumbsUp
-                opacity: root.transportAvailable(roomRow.player) ? 1 : 0
-                enabled: root.transportAvailable(roomRow.player)
+                opacity: root.rateable(roomRow.player) ? 1 : 0
+                enabled: root.rateable(roomRow.player)
                 color: root.bar.foreground
                 font.family: root.bar.fontFamily
                 font.pixelSize: Style.font.body
@@ -2529,8 +2538,8 @@ BarWidget {
 
               Text {
                 text: root.glyphs.thumbsDown
-                opacity: root.transportAvailable(roomRow.player) ? 1 : 0
-                enabled: root.transportAvailable(roomRow.player)
+                opacity: root.rateable(roomRow.player) ? 1 : 0
+                enabled: root.rateable(roomRow.player)
                 color: root.bar.foreground
                 font.family: root.bar.fontFamily
                 font.pixelSize: Style.font.body
