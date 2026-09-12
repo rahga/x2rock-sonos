@@ -979,6 +979,34 @@ BarWidget {
     tvProc.running = true
   }
 
+  // No MPRIS field carries a track's rating - the daemon cannot know one at
+  // all, since only a SMAPI call to the *service* answers it and the daemon
+  // is LAN-only by design (see docs/architecture.md). So this fires and, on
+  // refusal, only warns to the journal - the same choice `soundbarProc` makes
+  // for the same reason: there is no rating indicator drawn anywhere here to
+  // snap back from, so a quieter failure is not a worse one.
+  //
+  // Shown whenever `transportAvailable` is - the same gate play/pause/skip
+  // use - not because every track there is rateable (most are not: only a
+  // Pandora-shaped radio feature offers this, and never a Live broadcast),
+  // but because knowing which one *is* would need the same internet call
+  // this function makes, and paying for it on every track change just to
+  // decide whether to draw a button costs more than a button that sometimes
+  // answers "nothing rateable is playing."
+  Process {
+    id: rateProc
+    onExited: function(code) {
+      if (code !== 0) console.warn("x2rock: rate failed, code " + code)
+    }
+  }
+
+  function rateTrack(room, up) {
+    if (rateProc.running) return
+    root.focusedName = room
+    rateProc.command = [root.command, "rate", up ? "up" : "down", "-r", room]
+    rateProc.running = true
+  }
+
   function membersOf(player) {
     var members = player && player.metadata ? player.metadata["x2rock:members"] : null
     return (members && members.length) ? members : []
@@ -1582,7 +1610,13 @@ BarWidget {
     "add": "+",
     "remove": "󰅖",
     "moveUp": "󰅃",
-    "moveDown": "󰅀"
+    "moveDown": "󰅀",
+    // nf-md-thumb_up (U+F0513) / nf-md-thumb_down (U+F0511), verified against
+    // the JetBrainsMono Nerd Font this widget already depends on (rendered and
+    // visually confirmed, 2026-09-12) rather than guessed from the name alone -
+    // a wrong codepoint here is a silent box, not an error.
+    "thumbsUp": "󰔓",
+    "thumbsDown": "󰔑"
   })
 
   // Each key falls back on its own, so overriding one glyph does not mean
@@ -2090,6 +2124,10 @@ BarWidget {
             if (player && root.totalRooms > 1) root.toggleParty(player.identity)
           } else if (event.key === Qt.Key_T) {
             if (root.hasTvInput(player)) root.switchToTv(player.identity)
+          } else if (event.key === Qt.Key_U) {
+            if (player) root.rateTrack(player.identity, true)
+          } else if (event.key === Qt.Key_D) {
+            if (player) root.rateTrack(player.identity, false)
           } else {
             return
           }
@@ -2460,6 +2498,45 @@ BarWidget {
                   anchors.margins: -Style.space(4)
                   cursorShape: roomRow.player.canGoNext ? Qt.PointingHandCursor : Qt.ArrowCursor
                   onClicked: root.skip(roomRow.player, true)
+                }
+              }
+
+              // Whether the current track can actually be rated is a SMAPI
+              // question this widget cannot answer without the round trip
+              // pressing the button already pays for - see rateTrack. So these
+              // are held to the same gate as play/pause/skip, not to whether
+              // this particular track is one of the few that support it.
+              Text {
+                text: root.glyphs.thumbsUp
+                opacity: root.transportAvailable(roomRow.player) ? 1 : 0
+                enabled: root.transportAvailable(roomRow.player)
+                color: root.bar.foreground
+                font.family: root.bar.fontFamily
+                font.pixelSize: Style.font.body
+                anchors.verticalCenter: parent.verticalCenter
+
+                MouseArea {
+                  anchors.fill: parent
+                  anchors.margins: -Style.space(4)
+                  cursorShape: Qt.PointingHandCursor
+                  onClicked: root.rateTrack(roomRow.player.identity, true)
+                }
+              }
+
+              Text {
+                text: root.glyphs.thumbsDown
+                opacity: root.transportAvailable(roomRow.player) ? 1 : 0
+                enabled: root.transportAvailable(roomRow.player)
+                color: root.bar.foreground
+                font.family: root.bar.fontFamily
+                font.pixelSize: Style.font.body
+                anchors.verticalCenter: parent.verticalCenter
+
+                MouseArea {
+                  anchors.fill: parent
+                  anchors.margins: -Style.space(4)
+                  cursorShape: Qt.PointingHandCursor
+                  onClicked: root.rateTrack(roomRow.player.identity, false)
                 }
               }
 

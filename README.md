@@ -1,7 +1,8 @@
 # x2rock.sonos — Omarchy bar widget
 
 Sonos rooms in the bar: now-playing, transport, per-room volume, favorites,
-browsing and searching a music service, grouping and party mode. Driven entirely by the `x2rock daemon`'s MPRIS players.
+browsing and searching a music service, grouping, party mode, and rating a
+track up or down where the service offers it. Driven entirely by the `x2rock daemon`'s MPRIS players.
 
 Needs `x2rock` on `PATH` and `x2rock daemon` running. With no daemon there are
 no players, and the widget hides itself.
@@ -75,6 +76,7 @@ which is an ordinary Unicode character. Override any subset:
 | `repeat` | `󰑖` | Room row, off or repeating the queue |
 | `repeatOne` | `󰑘` | Room row, repeating one track |
 | `shuffle` | `󰒝` | Room row |
+| `thumbsUp` / `thumbsDown` | `󰔓` / `󰔑` | Room row — rate the current track, where the service offers it (a Pandora-shaped radio feature; never a Live broadcast). Shown alongside transport regardless, since knowing whether a given track can be rated needs the same round trip pressing the button does |
 | `mute` | `󰝟` | Where a muted room's percentage would be, beside its dimmed slider |
 | `music` | `󰝚` | Opens that room's music picker — favorites, kept items, browsing and search |
 | `group` | `󰌷` | Opens that room's grouping panel |
@@ -189,6 +191,7 @@ along a row of ten:
 | `←` / `→` | That room's volume, down or up, in the same 2% steps as the scroll gesture. |
 | `Space` | Play or pause. |
 | `n` / `p` | Next or previous track, where the source allows it. |
+| `u` / `d` | Rate the current track up or down, where the service offers it. |
 | `r` | Repeat: off → all → one → off, skipping what the source cannot do. |
 | `s` | Shuffle. |
 | `f` | Music picker for that room: favorites, kept items, browsing and search. |
