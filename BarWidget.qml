@@ -460,11 +460,12 @@ BarWidget {
           root.searchStatus = root.strings.searchError.arg(root.searchService)
           return
         }
-        if (!Array.isArray(parsed)) {
+        var items = root.itemsIn(parsed)
+        if (items === null) {
           root.searchStatus = root.strings.searchError.arg(root.searchService)
           return
         }
-        root.searchResults = parsed
+        root.searchResults = items
         // The reply answers what was asked, which may no longer be what is
         // typed. Binding to pendingTerm rather than to the field is what keeps
         // a slow answer from appearing under a query nobody made.
@@ -516,11 +517,12 @@ BarWidget {
           root.browseStatus = root.strings.browseError
           return
         }
-        if (!Array.isArray(parsed)) {
+        var items = root.itemsIn(parsed)
+        if (items === null) {
           root.browseStatus = root.strings.browseError
           return
         }
-        root.browseItems = parsed
+        root.browseItems = items
         root.browseAnsweredFor = root.browseKey(root.browseFrame)
         root.browseStatus = ""
         root.selectedIndex = 0
@@ -774,6 +776,18 @@ BarWidget {
   /// One of the daemon's namespaced boolean keys. `=== true` rather than a
   /// truthy test on purpose: an absent key is "nothing to say about this
   /// room", not "false", and the two differ for the soundbar settings.
+  // `browse --json` and `search --json` answer `{total, index, items}`. They
+  // answered a bare array before paging existed, and the binary on PATH is not
+  // always the one this widget shipped with - a half-finished upgrade, or a
+  // build in ~/.local/bin older than the plugin - so both shapes are accepted
+  // rather than letting an ordering accident empty the picker. Returns null
+  // for anything that is neither, which both callers treat as an error.
+  function itemsIn(parsed) {
+    if (Array.isArray(parsed)) return parsed
+    if (parsed && Array.isArray(parsed.items)) return parsed.items
+    return null
+  }
+
   function metaFlag(player, key) {
     return !!(player && player.metadata && player.metadata[key] === true)
   }
