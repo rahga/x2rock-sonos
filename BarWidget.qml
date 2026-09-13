@@ -1388,6 +1388,42 @@ BarWidget {
     groupingProc.running = true
   }
 
+  /// Whether the members sit at different levels - the one case the Sonos app
+  /// offers "Normalize Group Volume" for. Read off the levels the sliders show,
+  /// pending ones included, so a drag brings the button up and a press puts it
+  /// away without waiting on the daemon. A fixed-volume member has no level to
+  /// even out, and with no aligned levels there is nothing to judge.
+  readonly property bool groupingUneven: {
+    if (groupingShownMembers.length < 2 || groupingVolumes.length === 0) return false
+    var first = -1
+    for (var i = 0; i < groupingMembers.length; i++) {
+      var room = groupingMembers[i]
+      if (memberIsFixed(room)) continue
+      var level = Math.round(groupingLevelOf(room) * 100)
+      if (first === -1) first = level
+      else if (level !== first) return true
+    }
+    return false
+  }
+
+  Process { id: normalizeProc }
+
+  /// Every member to the group's own level, through `vol normalize`. The group
+  /// level is the rounded average of the members, so it is where they all land,
+  /// and the sliders are staged there for the same reason a drag is.
+  function normalizeGroup() {
+    if (!groupingUneven || normalizeProc.running) return
+    var level = volumeLevelOf(groupingPlayer)
+    var pending = {}
+    for (var key in root.pendingVolumes) pending[key] = root.pendingVolumes[key]
+    for (var i = 0; i < groupingMembers.length; i++)
+      if (!memberIsFixed(groupingMembers[i])) pending[groupingMembers[i]] = level
+    root.pendingVolumes = pending
+    pendingVolumesTimer.restart()
+    normalizeProc.command = [root.command, "vol", "normalize", "-r", root.groupingFor]
+    normalizeProc.running = true
+  }
+
   // The queue, like favorites, is something MPRIS cannot carry: it describes one
   // track, not the list around it. So the list comes from the CLI, read when the
   // view is opened and again after every edit this widget makes - never on a
@@ -1611,6 +1647,10 @@ BarWidget {
     "party": "◉",
     "group": "󰌷",
     "ungroup": "󰌸",
+    // nf-md-sync (U+F04E6), the circular arrows the Sonos app draws beside its
+    // group slider for the same action. Verified present in JetBrainsMono Nerd
+    // Font with `fc-list ":charset=f04e6"`.
+    "normalize": "󰓦",
     "tv": "󰠹",
     "queue": "󰲹",
     // nf-md-radio_tower (U+F043B), beside the name of anything the player is
@@ -1724,6 +1764,7 @@ BarWidget {
     "everyRoomGrouped": "Every room is in this group.",
     "leave": "leave",
     "join": "join",
+    "normalize": "normalize",
     // A fragment, in "12 of 70". Word order is the price of not building
     // real message templates for one phrase.
     "of": "of",
@@ -3337,6 +3378,8 @@ BarWidget {
           root.nudgeGroupingVolume(-0.02)
         } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
           root.activateGroupingRow()
+        } else if (event.key === Qt.Key_N) {
+          root.normalizeGroup()
         } else {
           return
         }
@@ -3358,12 +3401,44 @@ BarWidget {
 
         // Only when there is a group to speak of; a room on its own has
         // nothing to leave.
-        Text {
+        Item {
           visible: root.groupingMembers.length > 1
-          text: root.strings.playingTogether
-          color: root.offFg
-          font.family: root.bar.fontFamily
-          font.pixelSize: Style.font.caption
+          width: groupingColumn.width
+          height: togetherHeading.implicitHeight
+
+          Text {
+            id: togetherHeading
+            anchors.left: parent.left
+            text: root.strings.playingTogether
+            color: root.offFg
+            font.family: root.bar.fontFamily
+            font.pixelSize: Style.font.caption
+          }
+
+          // Opposite the heading and over the members' leave glyphs, and only
+          // while their levels differ. Named under the pointer, as leave is,
+          // because circular arrows alone read as "refresh".
+          Text {
+            visible: root.groupingUneven
+            anchors.verticalCenter: togetherHeading.verticalCenter
+            anchors.right: parent.right
+            anchors.rightMargin: Style.space(8)
+            text: normalizeArea.containsMouse
+              ? root.strings.normalize + "  " + root.glyphs.normalize
+              : root.glyphs.normalize
+            color: normalizeArea.containsMouse ? root.bar.foreground : root.offFg
+            font.family: root.bar.fontFamily
+            font.pixelSize: Style.font.caption
+
+            MouseArea {
+              id: normalizeArea
+              anchors.fill: parent
+              anchors.margins: -Style.space(4)
+              hoverEnabled: true
+              cursorShape: Qt.PointingHandCursor
+              onClicked: root.normalizeGroup()
+            }
+          }
         }
 
         Repeater {

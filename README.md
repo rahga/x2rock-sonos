@@ -81,6 +81,7 @@ which is an ordinary Unicode character. Override any subset:
 | `music` | `󰝚` | Opens that room's music picker — favorites, kept items, browsing and search |
 | `group` | `󰌷` | Opens that room's grouping panel |
 | `ungroup` | `󰌸` | Sends one room back out on its own |
+| `normalize` | `󰓦` | Grouping panel, opposite "Playing together" — sets every member to the group's level. Shown only while the members' levels differ |
 | `tv` | `󰠹` | Switches a soundbar to its TV input, and stands in for cover art while it is on TV |
 | `queue` | `󰲹` | Opens that room's queue |
 | `radio` | `󰐻` | Before the name, when the room is playing a live stream. Hovering it names the station |
@@ -138,6 +139,7 @@ Anything the bar's font can draw works, including plain text — `"music":
 | `playTogetherWith` / `addAnother` | `Play together with` / `Add another` — heading over the rooms that can join |
 | `everyRoomGrouped` | `Every room is in this group.` |
 | `leave` / `join` | `leave` / `join` — shown on hover beside their glyphs |
+| `normalize` | `normalize` — shown on hover beside its glyph |
 | `of` | `of`, as in "12 of 70" |
 | `kindStream` `kindAlbum` `kindTrack` `kindProgram` `kindPlaylist` | `stream` `album` `track` `program` `playlist` — the word under a favorite's name. Sonos supplies these in English of its own; without these keys they would be the only English left in a translated widget. |
 | `tooltipTv` / `tooltipTvOn` | `TV Input` / `TV Input (current source)` — the TV switch's tooltip, before and while that room is on its TV input |
@@ -214,7 +216,7 @@ it there, so there is one of them rather than one per input device:
 |---|---|---|
 | Music | Plays the row in the room, or opens it when it is a container | Type to filter. `Backspace` or `←` on an empty filter goes back up a container |
 | Queue | Jumps to that track | The cursor starts on the playing track |
-| Grouping | Leaves the group, on a member; joins it, on a room outside | `←` / `→` set the selected member's own volume, not the group's |
+| Grouping | Leaves the group, on a member; joins it, on a room outside | `←` / `→` set the selected member's own volume, not the group's. `n` normalizes the members to the group's level, while the button is shown |
 
 The room that hosts a group is the group, so it has no leave target and `Enter`
 does nothing on its row. Closing a panel does not bring the room list back,
