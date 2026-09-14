@@ -149,12 +149,14 @@ BarWidget {
   // not the plan.
   readonly property var shownFavorites: {
     // Drop favorites the household can no longer play. A service removed in the
-    // Sonos app leaves its favorites behind - greyed there, and `playable:
-    // false` here (both read the same Control API, so the two states are the
-    // same signal). x2rock can neither delete nor re-add a favorite - only the
-    // app can - so an unplayable one in the picker is a dead end with no action
-    // behind it; hiding it is the honest thing. `!== false` keeps anything an
-    // older CLI emitted without the field, rather than hiding on uncertainty.
+    // Sonos app leaves its favorites behind, greyed there. The CLI's `playable:
+    // false` is its own inference, not a field the player sends: the favorite
+    // carries neither a service nor a content type, which is what those shells
+    // look like (checked 2026-09-13: hidden YouTube Music and TuneIn favorites
+    // both failed to load). x2rock can neither delete nor re-add a favorite -
+    // only the app can - so an unplayable one in the picker is a dead end with
+    // no action behind it. `!== false` keeps anything an older CLI emitted
+    // without the field, rather than hiding on uncertainty.
     var playable = []
     for (var p = 0; p < favorites.length; p++)
       if (favorites[p].playable !== false) playable.push(favorites[p])

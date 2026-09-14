@@ -112,11 +112,13 @@ instead, which helps only if a font on the box draws it that way.
 that name still works: a `shell.json` written against it needs no editing.
 
 The picker hides favorites the household can no longer play — the ones the
-Sonos app greys out after their service is removed (`playable: false` from
-`x2rock favorites --json`; the widget and the app read the same Control API).
-x2rock can neither delete nor re-add a favorite, so a dead one here would be a
-row with no action behind it; it is left out rather than shown inert. Re-add
-the service in the Sonos app and its favorites return on their own.
+Sonos app greys out after their service is removed. It goes by `playable: false`
+from `x2rock favorites --json`, which is the CLI's inference rather than a flag
+the player sends: a favorite carrying neither a service nor a content type is
+what those leftovers look like. x2rock can neither delete nor re-add a
+favorite, so a dead one here would be a row with no action behind it; it is
+left out rather than shown inert. Re-add the service in the Sonos app and its
+favorites return on their own.
 
 Anything the bar's font can draw works, including plain text — `"music":
 "fav"` is valid. If a glyph comes out as a box, the font lacks that codepoint;
