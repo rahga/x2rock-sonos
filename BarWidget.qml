@@ -148,11 +148,22 @@ BarWidget {
   // bedtime mixes. There are dozens of these; scrolling to one is the fallback,
   // not the plan.
   readonly property var shownFavorites: {
+    // Drop favorites the household can no longer play. A service removed in the
+    // Sonos app leaves its favorites behind - greyed there, and `playable:
+    // false` here (both read the same Control API, so the two states are the
+    // same signal). x2rock can neither delete nor re-add a favorite - only the
+    // app can - so an unplayable one in the picker is a dead end with no action
+    // behind it; hiding it is the honest thing. `!== false` keeps anything an
+    // older CLI emitted without the field, rather than hiding on uncertainty.
+    var playable = []
+    for (var p = 0; p < favorites.length; p++)
+      if (favorites[p].playable !== false) playable.push(favorites[p])
+
     var needle = filterText.toLowerCase().trim()
-    if (needle === "") return favorites
+    if (needle === "") return playable
     var found = []
-    for (var i = 0; i < favorites.length; i++) {
-      var favorite = favorites[i]
+    for (var i = 0; i < playable.length; i++) {
+      var favorite = playable[i]
       var name = String(favorite.name || "").toLowerCase()
       var service = String(favorite.service || "").toLowerCase()
       if (name.indexOf(needle) !== -1 || service.indexOf(needle) !== -1)
