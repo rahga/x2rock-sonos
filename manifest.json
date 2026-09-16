@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "id": "x2rock.sonos",
-  "name": "Sonos",
+  "name": "x2rock for Sonos",
   "version": "0.1.0",
   "author": "Richard Hoelscher",
   "license": "0BSD",
@@ -11,7 +11,7 @@
     "barWidget": "BarWidget.qml"
   },
   "barWidget": {
-    "displayName": "Sonos",
+    "displayName": "x2rock for Sonos",
     "description": "Rooms with per-room volume, driven by the x2rock MPRIS daemon",
     "category": "Media",
     "allowMultiple": false

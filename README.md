@@ -1,4 +1,4 @@
-# x2rock.sonos — Omarchy bar widget
+# x2rock for Sonos — Omarchy bar widget
 
 Sonos rooms in the bar: now-playing, transport, per-room volume, favorites,
 browsing and searching a music service, grouping, party mode, and rating a
