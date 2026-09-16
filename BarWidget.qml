@@ -51,6 +51,7 @@ BarWidget {
   // have each closing the other: a KeyboardPanel dismisses by calling
   // owner.close().
   function close() { popupOpen = false }
+  function toggle() { popupOpen = !popupOpen }
 
   // What the bar looks for before it will summon a widget: `open()`, `close()`
   // and an `opened` property, all three or none (Bar.findPanelWidget). With
@@ -66,6 +67,7 @@ BarWidget {
   // KeyboardPanel a defined property to read off its `owner` (it evaluates
   // `!!(owner.popoutSwitchClosing)`) instead of an undefined one.
   readonly property bool popoutSwitchClosing: false
+  function closeForPopoutSwitch() { close() }
 
   // Favorites are the one thing here that MPRIS cannot carry - it has no notion
   // of them, and Quickshell's Mpris does not implement the optional Playlists
