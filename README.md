@@ -13,6 +13,42 @@ no players, and the widget hides itself.
 shot above — regenerate it from the running popup and overwrite the file to keep
 both current.
 
+## Installation
+
+### Prerequisites
+
+1. Install `x2rock` (via `cargo install x2rock` or from source) so `x2rock` is available on your `PATH`.
+2. Start the MPRIS background daemon:
+   ```bash
+   # as a systemd user service:
+   systemctl --user enable --now x2rock.service
+
+   # or manually in the background:
+   x2rock daemon &
+   ```
+
+### Add the Widget
+
+Install and enable the widget in your Omarchy bar:
+
+```bash
+omarchy plugin add https://github.com/rahga/x2rock-sonos --enable
+```
+
+## Removal
+
+To disable the widget from the bar without removing files:
+
+```bash
+omarchy plugin disable x2rock.sonos
+```
+
+To remove the plugin completely:
+
+```bash
+omarchy plugin remove x2rock.sonos
+```
+
 ## Configuring
 
 Everything below is set on this widget's entry in the `bar.layout` subtree of
@@ -247,3 +283,5 @@ the popup and the picker, which are opened deliberately.
 - `BarWidget.qml` — the widget. Installed by copy; edits do not survive updates.
 - `CoverArt.qml` — cover tile with the themed placeholder.
 - `manifest.json` — plugin metadata for Omarchy's loader.
+- `preview.png` — gallery screenshot for marketplace discovery.
+- `LICENSE` — 0BSD open source license.
