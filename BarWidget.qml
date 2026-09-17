@@ -135,6 +135,26 @@ BarWidget {
   readonly property bool browsing: browseStack.length > 0
   readonly property var browseFrame: browsing ? browseStack[browseStack.length - 1] : null
 
+  /// The services index is a frame like any other, so "up" and the back stack
+  /// need no special case. What tells it apart is that it names no service,
+  /// which is also what keeps `fetchBrowse` from asking the CLI about it: its
+  /// rows are in hand before it opens.
+  readonly property string servicesFrameId: "services"
+  readonly property bool browsingIndex: browsing && browseFrame
+                                        && browseFrame.service === ""
+                                        && browseFrame.id === servicesFrameId
+
+  // The same local filter every other list here gets.
+  readonly property var shownServices: {
+    var needle = filterText.toLowerCase().trim()
+    if (needle === "") return browseServices
+    var found = []
+    for (var i = 0; i < browseServices.length; i++)
+      if (String(browseServices[i]).toLowerCase().indexOf(needle) !== -1)
+        found.push(browseServices[i])
+    return found
+  }
+
   // The same local filter the favorites list gets, over whatever container is
   // open. No round trip: a container is already in hand, and typing must not
   // put a network call behind a keystroke.
@@ -199,11 +219,27 @@ BarWidget {
         item: {
           name: strings.up.arg(browseStack.length > 1
                                ? browseStack[browseStack.length - 2].title
-                               : browseFrame.service),
+                               : (root.browsingIndex ? strings.pickerHome
+                                                     : browseFrame.service)),
           type: "",
           art_url: ""
         }
       }]
+      // The index answers itself, so the guard below - which waits for a reply
+      // - would never let its rows through.
+      if (root.browsingIndex) {
+        var svcs = root.shownServices
+        for (var s = 0; s < svcs.length; s++)
+          out.push({ kind: "browseService",
+                     item: { name: svcs[s], type: "", art_url: "", service: svcs[s] } })
+        if (svcs.length === 0)
+          out.push({ kind: "note",
+                     item: { name: root.browseServices.length > 0
+                                   ? strings.noMatch : strings.browseEmpty,
+                             type: "", art_url: "" } })
+        return out
+      }
+
       // Only once the reply belongs to the container on screen. Until then the
       // status line says what is happening and the list stays honest.
       if (browseAnsweredFor === browseKey(browseFrame)) {
@@ -226,17 +262,13 @@ BarWidget {
     var kept = shownBookmarks
     for (var k = 0; k < kept.length; k++) rows.push({ kind: "bookmark", item: kept[k] })
 
-    // The way in to each service's own containers, and an *action* like the
-    // search row: nothing leaves the machine until one is chosen. Listed after
-    // what is already in hand, because a name someone saved beats a tree they
-    // have to walk.
-    var services = browseServices
-    for (var v = 0; v < services.length; v++)
-      rows.push({
-        kind: "browseService",
-        item: { name: strings.browseIn.arg(services[v]), type: "", art_url: "",
-                service: services[v] }
-      })
+    // One door rather than one row per service. A household can reach dozens -
+    // 32 here - and a picker that lists a catalogue answers a different
+    // question from "what should this room play". Listed after what is already
+    // in hand, because a name someone saved beats a tree they have to walk.
+    if (browseServices.length > 0)
+      rows.push({ kind: "servicesIndex",
+                  item: { name: strings.services, type: "", art_url: "" } })
 
     var term = filterText.trim()
     if (!searchEnabled || term === "") return rows
@@ -271,6 +303,7 @@ BarWidget {
     else if (row.kind === "bookmark") root.playBookmark(root.pickingFor, row.item)
     else if (row.kind === "result") root.playSearchResult(root.pickingFor, row.item)
     else if (row.kind === "search") root.runSearch()
+    else if (row.kind === "servicesIndex") root.openServicesIndex()
     else if (row.kind === "browseService") root.browseInto(row.item.service, "root", row.item.service)
     else if (row.kind === "container")
       // The row's own service when it has one - a container can arrive as a
@@ -568,6 +601,22 @@ BarWidget {
     root.fetchBrowse()
   }
 
+  /// Open the services index. A push like `browseInto`, minus the fetch: the
+  /// list is `browseServices`, which is already known.
+  function openServicesIndex() {
+    var stack = root.browseStack.slice()
+    stack.push({ service: "", id: root.servicesFrameId, title: root.strings.services })
+    root.browseStack = stack
+    root.browseItems = []
+    root.browseAnsweredFor = ""
+    root.browseStatus = ""
+    root.selectedIndex = 0
+    root.filterText = ""
+    filterField.text = ""
+    // The household's list is only read when something asks to see it.
+    if (root.browseAllServices) root.loadHouseholdServices()
+  }
+
   /// Back one level, and out to favorites from the top.
   function browseUp() {
     var stack = root.browseStack.slice()
@@ -584,7 +633,8 @@ BarWidget {
 
   function fetchBrowse() {
     var frame = root.browseFrame
-    if (!frame || browseProc.running) return
+    // A frame naming no service is the index, which answers itself.
+    if (!frame || !frame.service || browseProc.running) return
     root.browseStatus = root.strings.browseLoading
     browseProc.command = [root.command, "browse", "-s", frame.service,
                           "--json", "--count", String(root.browseCount), frame.id]
@@ -1808,6 +1858,11 @@ BarWidget {
     // and the place one level up in `up` - the parent container's name, or the
     // service's own at the top of the tree.
     "browseIn": "Browse %1",
+    // The row that opens the services index, which is also the index frame's
+    // own name - so a service opened from it says "back to Services".
+    "services": "Services",
+    // Where "up" lands from the index: the favorites and kept items it opened over.
+    "pickerHome": "Back",
     "up": "← %1",
     "browseLoading": "Opening…",
     "browseError": "Could not open that",
@@ -3058,6 +3113,7 @@ BarWidget {
             // sections icons - so it keeps its tile.
             visible: root.showArt && entry.kind !== "search" && entry.kind !== "note"
                      && entry.kind !== "browseService" && entry.kind !== "up"
+                     && entry.kind !== "servicesIndex"
             url: entry.payload.art_url || ""
             placeholder: root.glyphs.speaker
             foreground: root.bar.foreground
@@ -3074,6 +3130,7 @@ BarWidget {
             anchors.right: parent.right
             anchors.rightMargin: Style.space(8)
             visible: entry.kind === "container" || entry.kind === "browseService"
+                     || entry.kind === "servicesIndex"
             text: "›"
             color: root.secondaryFg
             font.family: root.bar.fontFamily
