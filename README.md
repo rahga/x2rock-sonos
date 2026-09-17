@@ -4,20 +4,15 @@ Sonos rooms in the bar: now-playing, transport, per-room volume, favorites,
 browsing and searching a music service, grouping, party mode, and rating a
 track up or down where the service offers it. Driven entirely by the `x2rock daemon`'s MPRIS players.
 
-Needs `x2rock` on `PATH` and `x2rock daemon` running. With no daemon there are
-no players, and the widget hides itself.
+Needs `x2rock` on `PATH` and `x2rock daemon` running. When no Sonos players are detected, the widget hides itself.
 
 ![The popup: every room with per-room transport, volume and TV badges](preview.png)
-
-`preview.png` is the plugin's gallery image (per the Omarchy plugin spec) and the
-shot above — regenerate it from the running popup and overwrite the file to keep
-both current.
 
 ## Installation
 
 ### Prerequisites
 
-1. Install `x2rock` (via `cargo install x2rock` or from source) so `x2rock` is available on your `PATH`.
+1. Install [x2rock](https://github.com/rahga/x2rock) (via `cargo install x2rock` or from source) so `x2rock` is available on your `PATH`.
 2. Start the MPRIS background daemon:
    ```bash
    # as a systemd user service:
