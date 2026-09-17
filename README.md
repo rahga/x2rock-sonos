@@ -12,15 +12,7 @@ Needs `x2rock` on `PATH` and `x2rock daemon` running. When no Sonos players are 
 
 ### Prerequisites
 
-1. Install [x2rock](https://github.com/rahga/x2rock) (via `cargo install x2rock` or from source) so `x2rock` is available on your `PATH`.
-2. Start the MPRIS background daemon:
-   ```bash
-   # as a systemd user service:
-   systemctl --user enable --now x2rock.service
-
-   # or manually in the background:
-   x2rock daemon &
-   ```
+This widget communicates over local MPRIS D-Bus and requires the `x2rock` daemon running in the background. Refer to the [x2rock repository](https://github.com/rahga/x2rock) for daemon setup and service configuration.
 
 ### Add the Widget
 
