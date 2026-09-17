@@ -113,6 +113,11 @@ BarWidget {
   // Feeds the default `browseServices`; see the binding below for why.
   property var linkedServices: []
 
+  // Every service the *household* can reach, which is a different set from the
+  // accounts this machine has linked and the one someone means after adding a
+  // service in the Sonos app. Read only when `browseServices` asks for it.
+  property var householdServices: []
+
   // Walking a service's containers. A stack rather than a current-id, because
   // the useful gesture is "back where I came from" and only the path knows
   // where that is. Empty means the picker is at home, showing favorites.
@@ -321,6 +326,7 @@ BarWidget {
     // Re-read on every open, like favorites: an account linked in a terminal
     // minutes ago should not need a shell restart to reach the picker.
     root.loadLinkedServices()
+    if (root.browseAllServices) root.loadHouseholdServices()
   }
 
   function closePicker() {
@@ -733,6 +739,41 @@ BarWidget {
   function loadLinkedServices() {
     if (accountsProc.running) return
     accountsProc.running = true
+  }
+
+  // The household's own catalogue, for `"browseServices": "all"`. Reads the
+  // cached list the CLI keeps, so it costs no round trip until something is
+  // actually chosen - the same rule the rest of this picker follows. Failure is
+  // silent, like the accounts read: the fallback is the list already in hand.
+  Process {
+    id: servicesProc
+    command: [root.command, "browse", "--json"]
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        if (!text || text.trim() === "") return
+        try {
+          var parsed = JSON.parse(text)
+          if (!Array.isArray(parsed)) return
+          var names = []
+          for (var i = 0; i < parsed.length; i++) {
+            var name = String(parsed[i] || "")
+            if (name !== "" && names.indexOf(name) === -1) names.push(name)
+          }
+          names.sort(function(a, b) {
+            return a.toLowerCase() < b.toLowerCase() ? -1 : 1
+          })
+          root.householdServices = names
+        } catch (e) {
+          // Leave whatever was already known; see the favorites picker.
+        }
+      }
+    }
+  }
+
+  function loadHouseholdServices() {
+    if (servicesProc.running) return
+    servicesProc.running = true
   }
 
   // By name, which is what `bookmark` matches on, and which is unique enough:
@@ -1882,7 +1923,16 @@ BarWidget {
   // room play". Naming `browseServices` by hand still wins verbatim, which is
   // how one of those anonymous services gets a row - and `[]` still turns
   // browsing off.
+  // `"all"`: every service the household can reach rather than the discovered
+  // few. Its own property because two places ask - the list below, and the
+  // picker, which only pays for the read when the answer is wanted.
+  readonly property bool browseAllServices: {
+    var given = setting("browseServices", null)
+    return typeof given === "string" && given.toLowerCase() === "all"
+  }
+
   readonly property var browseServices: {
+    if (root.browseAllServices) return root.householdServices
     var given = setting("browseServices", null)
     if (Array.isArray(given)) {
       var names = []
