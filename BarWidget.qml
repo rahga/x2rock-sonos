@@ -101,9 +101,17 @@ BarWidget {
   /// whenever a drill-in opens or closes, because it describes this look at this
   /// service and nothing longer.
   property var categoryState: ({})
-  /// The `--count` the rows on screen were fetched with, so **Show all** knows
-  /// whether it must fetch deeper or merely reveal what is already here.
+  /// The `--count` the rows **on screen** were fetched with, so **Show all**
+  /// knows whether it must fetch deeper or merely reveal what is already here.
+  /// Set when rows arrive, never when they are asked for: a failed deeper fetch
+  /// that had already claimed the depth would make every other category's
+  /// "Show all" quietly do nothing, showing the shallow rows as the whole set.
   property int serviceResultsDepth: 0
+  /// What the fetch in flight asked for, and which category asked. Both are
+  /// promoted by `onStreamFinished` and dropped on failure, so a heading that
+  /// could not be filled still offers to try again.
+  property int pendingDepth: 0
+  property string pendingAll: ""
   property string filterText: ""
   property int selectedIndex: 0
 
@@ -409,10 +417,15 @@ BarWidget {
   /// called again by **Show all**, and blanking the list someone is reading in
   /// order to show them more of it would be a strange way to do it. The status
   /// line says what is happening.
-  function fetchServiceResults(service, depth) {
-    if (!service || serviceResultsProc.running) return
+  function fetchServiceResults(service, depth, forCategory) {
+    if (!service) return false
+    // Cancelled rather than declined. Refusing while one is in flight made
+    // pressing a service heading a silent no-op for as long as a deeper fetch
+    // took, with nothing on screen to say why.
+    serviceResultsProc.running = false
     root.serviceResultsFor = String(service)
-    root.serviceResultsDepth = depth
+    root.pendingDepth = depth
+    root.pendingAll = forCategory ? String(forCategory) : ""
     root.serviceResultsStatus = root.strings.searching
     serviceResultsProc.command = [root.command, "search", "-s", String(service),
                                   "-c", root.searchAllCategories,
@@ -420,6 +433,7 @@ BarWidget {
                                   "--count", String(depth),
                                   "--json", root.searchedTerm]
     serviceResultsProc.running = true
+    return true
   }
 
   function closeServiceResults() {
@@ -429,6 +443,10 @@ BarWidget {
     root.serviceResultsStatus = ""
     root.categoryState = ({})
     root.serviceResultsDepth = 0
+    // Cancelled, not just ignored: a deeper fetch can be seconds long, and
+    // leaving it to run would block the next service heading pressed.
+    serviceResultsProc.running = false
+    root.pendingAll = ""
   }
 
   /// One service's rows under a heading per category.
@@ -490,15 +508,25 @@ BarWidget {
   /// a person who wants all of one usually wants all of the next as well.
   function expandCategory(category) {
     if (!category) return
-    var state = root.categoryState[category]
-    // Copied rather than mutated: QML only re-evaluates what depends on an
-    // object property when the property itself is set.
+    var wants = root.categoryState[category] === "page" ? "all" : "page"
+    // The last tier needs rows nobody has fetched, so the tier is not entered
+    // here - `onStreamFinished` enters it when they arrive. Claiming it now and
+    // failing would leave the heading unpressable, presenting the shallow rows
+    // as everything there is with no way to ask again.
+    if (wants === "all" && root.serviceResultsDepth < root.searchCategoryAll) {
+      root.fetchServiceResults(root.serviceResultsFor, root.searchCategoryAll, category)
+      return
+    }
+    root.setCategoryState(category, wants)
+  }
+
+  /// Copied rather than mutated: QML only re-evaluates what depends on an object
+  /// property when the property itself is set.
+  function setCategoryState(category, state) {
     var next = ({})
     for (var k in root.categoryState) next[k] = root.categoryState[k]
-    next[category] = state === "page" ? "all" : "page"
+    next[category] = state
     root.categoryState = next
-    if (next[category] === "all" && root.serviceResultsDepth < root.searchCategoryAll)
-      root.fetchServiceResults(root.serviceResultsFor, root.searchCategoryAll)
   }
 
   /// A category's heading. Sonos standardised the names, so the common ones get
@@ -907,7 +935,12 @@ BarWidget {
   Process {
     id: serviceResultsProc
     onExited: function(code) {
-      if (code !== 0) root.serviceResultsStatus = root.searchFailure()
+      // The tier goes with it: a heading that could not be filled must still
+      // offer to try, rather than sit there claiming to show everything.
+      if (code !== 0) {
+        root.serviceResultsStatus = root.searchFailure()
+        root.pendingAll = ""
+      }
     }
     stdout: StdioCollector {
       waitForEnd: true
@@ -916,16 +949,25 @@ BarWidget {
         if (items === undefined) return
         if (items === null) {
           root.serviceResultsStatus = root.searchFailure()
+          root.pendingAll = ""
           return
         }
         // The surface was left while this was in flight, so the answer belongs
-        // to nothing. One test rather than two: a second drill-in cannot start
-        // while this Process is running, so the only way the request and the
-        // open surface can disagree is if the surface closed.
+        // to nothing.
         if (root.serviceResultsFor === "") return
-        root.selectedIndex = 0
+        // Only now is the depth true of what is on screen, and only now has the
+        // category that asked for everything actually got it.
+        root.serviceResultsDepth = root.pendingDepth
         root.serviceResults = items
         root.serviceResultsStatus = ""
+        if (root.pendingAll !== "") {
+          root.setCategoryState(root.pendingAll, "all")
+          root.pendingAll = ""
+        }
+        // No selection reset: this also runs for a deeper fetch under someone
+        // reading the list, and throwing them back to the top of it in order to
+        // show them more of it would be a strange way to go about it. A fresh
+        // drill-in already set the index, and `onPickerRowsChanged` settles it.
       }
     }
   }
