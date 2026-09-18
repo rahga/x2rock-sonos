@@ -96,6 +96,12 @@ BarWidget {
   property string serviceResultsFor: ""
   property var serviceResults: []
   property string serviceResultsStatus: ""
+  /// Which service the reply in flight was asked for, so one that arrives after
+  /// the surface has been left is dropped rather than reopening it. The same
+  /// guard `searchProc` keeps with `pendingTerm` and `browseProc` with
+  /// `browseKey`, for the same reason: a slow answer must not land on a list
+  /// nobody is looking at, moving the selection under someone's cursor.
+  property string serviceResultsPending: ""
   property string filterText: ""
   property int selectedIndex: 0
 
@@ -361,6 +367,7 @@ BarWidget {
   /// standard category asks for the shelves the top-level sample could not show.
   function openServiceResults(service) {
     if (!service || serviceResultsProc.running) return
+    root.serviceResultsPending = String(service)
     root.serviceResultsFor = String(service)
     root.serviceResults = []
     root.serviceResultsStatus = root.strings.searching
@@ -377,7 +384,8 @@ BarWidget {
     root.serviceResultsFor = ""
     root.serviceResults = []
     root.serviceResultsStatus = ""
-    root.selectedIndex = 0
+    // Not zero: the merged list it returns to leads with a service heading.
+    root.selectedIndex = root.firstActionable()
   }
 
   /// One service's rows under a heading per category.
@@ -786,6 +794,8 @@ BarWidget {
           root.serviceResultsStatus = root.searchFailure()
           return
         }
+        if (root.serviceResultsFor !== root.serviceResultsPending
+            || root.serviceResultsFor === "") return
         root.serviceResults = items
         root.serviceResultsStatus = ""
         root.selectedIndex = root.firstActionable()
@@ -834,6 +844,12 @@ BarWidget {
   /// Descend. The frame is pushed before the reply arrives so the path and the
   /// back row are correct while it is still in flight.
   function browseInto(service, id, title) {
+    // A browse frame and the drill-in are both full-surface, and `pickerRows`
+    // answers the drill-in first - so opening a container from inside one would
+    // fetch the frame, grow the stack and show none of it. The drill-in is
+    // exactly where containers are common: its artists, albums and playlists
+    // buckets are nothing else.
+    root.closeServiceResults()
     if (!service || !id) return
     var stack = root.browseStack.slice()
     stack.push({ service: service, id: id, title: String(title || id) })
@@ -3324,7 +3340,9 @@ BarWidget {
         onTextChanged: {
           root.filterText = text
           // The old position means nothing once the list is a different list.
-          root.selectedIndex = 0
+          // Not zero, though: backspacing to a term already searched brings the
+          // grouped rows straight back, and those lead with a service heading.
+          root.selectedIndex = root.firstActionable()
           // A stale "could not reach" under a query nobody has run yet reads as
           // if the new text had already failed.
           if (root.searchStatus !== "" && !searchProc.running) root.searchStatus = ""
@@ -3337,8 +3355,12 @@ BarWidget {
           var items = root.pickerRows
           if (event.key === Qt.Key_Escape) {
             root.closePicker()
-          } else if ((event.key === Qt.Key_Backspace || event.key === Qt.Key_Left)
-                     && text === "" && root.serviceResultsFor !== "") {
+          } else if (event.key === Qt.Key_Left && root.serviceResultsFor !== "") {
+            // No `text === ""` guard, unlike the browse arm below: the drill-in
+            // deliberately leaves the search term in the box and never filters
+            // by it, so the box is never empty and that guard made this branch
+            // unreachable. Left alone, not Backspace, because Backspace still
+            // means "edit the term" and this surface has nothing else to edit.
             root.closeServiceResults()
           } else if ((event.key === Qt.Key_Backspace || event.key === Qt.Key_Left)
                      && root.browsing && text === "") {
@@ -3446,6 +3468,8 @@ BarWidget {
             visible: root.showArt && entry.kind !== "search" && entry.kind !== "note"
                      && entry.kind !== "browseService" && entry.kind !== "up"
                      && entry.kind !== "servicesIndex"
+                     && entry.kind !== "serviceHeader" && entry.kind !== "categoryHeader"
+                     && entry.kind !== "moreFromService" && entry.kind !== "backToResults"
             url: entry.payload.art_url || ""
             placeholder: root.glyphs.speaker
             foreground: root.bar.foreground
