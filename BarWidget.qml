@@ -271,7 +271,7 @@ BarWidget {
         for (var j = 0; j < hits.length; j++)
           rows.push({ kind: hits[j].container ? "container" : "result", item: hits[j] })
         if (hits.length === 0)
-          rows.push({ kind: "note", item: { name: strings.noResults, type: "", art_url: "" } })
+          rows.push({ kind: "note", item: { name: noResultsLabel(), type: "", art_url: "" } })
       } else {
         rows.push({
           kind: "search",
@@ -317,6 +317,16 @@ BarWidget {
   function searchLabel() {
     if (!root.searchMerged) return root.strings.searchFor.arg(root.searchService)
     return root.searchOnlyLinked ? root.strings.searchLinked : root.strings.searchEverywhere
+  }
+
+  /// Which haystack came up empty. The note is no longer the last row, so it
+  /// has to say what it is about rather than leaving the rows beneath it to
+  /// imply it.
+  function noResultsLabel() {
+    if (!root.searchMerged) return root.strings.noResults.arg(root.searchService)
+    return root.strings.noResults.arg(root.searchOnlyLinked
+                                      ? root.strings.linkedServices
+                                      : root.strings.everywhere)
   }
 
   function searchFailure() {
@@ -1902,7 +1912,13 @@ BarWidget {
     // A merged search names no one service, so it cannot blame one either: the
     // CLI reports the services that timed out on stderr, which is not read here.
     "searchFailed": "Search failed",
-    "noResults": "Nothing found",
+    // Names what found nothing, because the note sits above the favorites and
+    // bookmarks that may well have matched: a bare "Nothing found" at the top of
+    // a list with a playable row under it is simply wrong. %1 is the service, or
+    // the words for the merged tiers.
+    "noResults": "Nothing on %1",
+    "everywhere": "any service",
+    "linkedServices": "the linked services",
     // Walking a service's own containers. %1 is a service name in `browseIn`
     // and the place one level up in `up` - the parent container's name, or the
     // service's own at the top of the tree.
