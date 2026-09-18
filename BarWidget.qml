@@ -96,6 +96,9 @@ BarWidget {
   property string serviceResultsFor: ""
   property var serviceResults: []
   property string serviceResultsStatus: ""
+  /// Category ids whose rows are all shown. Emptied whenever a drill-in opens or
+  /// closes, because it describes this look at this service and nothing longer.
+  property var expandedCategories: []
   property string filterText: ""
   property int selectedIndex: 0
 
@@ -338,9 +341,12 @@ BarWidget {
   }
 
   function rowActionable(row) {
-    // A service heading opens that service; a category heading inside one is
-    // only a label, because its rows are already all there.
-    return !!row && row.kind !== "note" && row.kind !== "categoryHeader"
+    if (!row || row.kind === "note") return false
+    // A service heading always opens that service. A category heading is only a
+    // label once everything it has is on screen - until then it is the way to
+    // the rest of it.
+    if (row.kind === "categoryHeader") return !!row.item.more
+    return true
   }
 
   /// The next row in `delta`'s direction that can actually be pressed.
@@ -387,12 +393,13 @@ BarWidget {
     if (!service || serviceResultsProc.running) return
     root.serviceResultsFor = String(service)
     root.serviceResults = []
+    root.expandedCategories = []
     root.serviceResultsStatus = root.strings.searching
     root.selectedIndex = 0
     serviceResultsProc.command = [root.command, "search", "-s", String(service),
                                   "-c", root.searchAllCategories,
                                   "--per-service", "0",
-                                  "--count", String(root.searchCount),
+                                  "--count", String(root.searchCategoryCount),
                                   "--json", root.searchedTerm]
     serviceResultsProc.running = true
   }
@@ -402,6 +409,7 @@ BarWidget {
     root.serviceResultsFor = ""
     root.serviceResults = []
     root.serviceResultsStatus = ""
+    root.expandedCategories = []
   }
 
   /// One service's rows under a heading per category.
@@ -423,10 +431,26 @@ BarWidget {
       buckets[category].push(hits[i])
     }
     for (var k = 0; k < order.length; k++) {
+      var bucket = buckets[order[k]]
+      // Shown short by default, because six categories at their full depth is a
+      // list nobody scans. **More ›** reveals the rest of one category from rows
+      // already in hand - `searchCategoryCount` fetched them - so it costs
+      // nothing and cannot fail halfway.
+      var whole = root.expandedCategories.indexOf(order[k]) !== -1
+      var shown = whole ? bucket : bucket.slice(0, root.searchPerCategory)
       rows.push({ kind: "categoryHeader",
-                  item: { name: root.categoryLabel(order[k]), type: "", art_url: "" } })
-      root.appendHits(rows, buckets[order[k]])
+                  item: { name: root.categoryLabel(order[k]), type: "", art_url: "",
+                          category: order[k], more: shown.length < bucket.length } })
+      root.appendHits(rows, shown)
     }
+  }
+
+  /// Show the rest of one category, in place.
+  function expandCategory(category) {
+    if (!category || root.expandedCategories.indexOf(category) !== -1) return
+    // Reassigned rather than pushed into: QML only re-evaluates what depends on
+    // a list property when the property itself is set.
+    root.expandedCategories = root.expandedCategories.concat([category])
   }
 
   /// A category's heading. Sonos standardised the names, so the common ones get
@@ -548,6 +572,7 @@ BarWidget {
     else if (row.kind === "search") root.runSearch()
     else if (row.kind === "servicesIndex") root.openServicesIndex()
     else if (row.kind === "serviceHeader") root.openServiceResults(row.item.service)
+    else if (row.kind === "categoryHeader") root.expandCategory(row.item.category)
     else if (row.kind === "backToResults") root.closeServiceResults()
     else if (row.kind === "browseService") root.browseInto(row.item.service, "root", row.item.service)
     else if (row.kind === "container")
@@ -2364,6 +2389,16 @@ BarWidget {
   // the only way in, which is what this did before.
   readonly property int searchDelay: Math.max(0, Number(setting("searchDelay", 600)) || 0)
 
+  // Rows shown under one category heading inside a service's results, before
+  // **More ›** offers the rest. Four, because six categories at four apiece is
+  // already a screenful and the point of the grouping is to be scannable.
+  readonly property int searchPerCategory: Math.max(1, Number(setting("searchPerCategory", 4)) || 4)
+  // How deep the drill-in fetches each category. Larger than `searchCount`,
+  // which is tuned for a merged search showing three rows a service: here the
+  // rows behind "More" have to already be in hand, since expanding is a local
+  // reveal rather than another round trip.
+  readonly property int searchCategoryCount: Math.max(1, Number(setting("searchCategoryCount", 20)) || 20)
+
   readonly property int searchPerService: Math.max(1, Number(setting("searchPerService", 3)) || 3)
   // Every standard Sonos category name, sent on the drill-in. The CLI skips the
   // ones a service does not have, so naming them all is how "everything this
@@ -3555,20 +3590,22 @@ BarWidget {
             anchors.rightMargin: Style.space(8)
             visible: entry.kind === "container" || entry.kind === "browseService"
                      || entry.kind === "servicesIndex" || entry.kind === "serviceHeader"
+                     || (entry.kind === "categoryHeader" && !!entry.payload.more)
             text: "›"
             color: root.secondaryFg
             font.family: root.bar.fontFamily
             font.pixelSize: Style.font.body
           }
 
-          // What the chevron beside it will do, on a service heading only. The
-          // heading names the service and this names the action, which is the
-          // pair the mobile app puts at the top of each of its groups.
+          // What the chevron beside it will do. On a service heading that is
+          // opening the service; on a category heading it is revealing the rest
+          // of that category, which only says so while there is a rest.
           Text {
             anchors.verticalCenter: parent.verticalCenter
             anchors.right: entryInto.left
             anchors.rightMargin: Style.space(3)
             visible: entry.kind === "serviceHeader"
+                     || (entry.kind === "categoryHeader" && !!entry.payload.more)
             text: root.strings.more
             color: root.secondaryFg
             font.family: root.bar.fontFamily
