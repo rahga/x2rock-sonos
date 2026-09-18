@@ -255,6 +255,31 @@ BarWidget {
     }
 
     var rows = []
+
+    // The search goes first, offer and answers alike. Typing a term is a
+    // statement about what this is for, and the row that acts on it should not
+    // be below everything that merely happens to match. Keeping the answers
+    // where the offer was matters just as much: the results replace the row
+    // that was pressed, rather than appearing somewhere else on the list.
+    var term = filterText.trim()
+    if (searchEnabled && term !== "") {
+      if (searchedTerm === term) {
+        var hits = searchResults
+        // A hit is not always a thing to play. Every Mixcloud search result is a
+        // `tag:` collection, so a search can answer entirely in places - and
+        // offering one as a track would hand a container id to `play-item`.
+        for (var j = 0; j < hits.length; j++)
+          rows.push({ kind: hits[j].container ? "container" : "result", item: hits[j] })
+        if (hits.length === 0)
+          rows.push({ kind: "note", item: { name: strings.noResults, type: "", art_url: "" } })
+      } else {
+        rows.push({
+          kind: "search",
+          item: { name: searchLabel(), type: "", art_url: "" }
+        })
+      }
+    }
+
     var favs = shownFavorites
     for (var i = 0; i < favs.length; i++) rows.push({ kind: "favorite", item: favs[i] })
     // After the household's own, because favorites are what a household shares
@@ -270,24 +295,6 @@ BarWidget {
       rows.push({ kind: "servicesIndex",
                   item: { name: strings.services, type: "", art_url: "" } })
 
-    var term = filterText.trim()
-    if (!searchEnabled || term === "") return rows
-
-    if (searchedTerm === term) {
-      var hits = searchResults
-      // A hit is not always a thing to play. Every Mixcloud search result is a
-      // `tag:` collection, so a search can answer entirely in places - and
-      // offering one as a track would hand a container id to `play-item`.
-      for (var j = 0; j < hits.length; j++)
-        rows.push({ kind: hits[j].container ? "container" : "result", item: hits[j] })
-      if (hits.length === 0)
-        rows.push({ kind: "note", item: { name: strings.noResults, type: "", art_url: "" } })
-    } else {
-      rows.push({
-        kind: "search",
-        item: { name: searchLabel(), type: "", art_url: "" }
-      })
-    }
     return rows
   }
 
