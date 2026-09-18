@@ -167,6 +167,22 @@ BarWidget {
                                         && browseFrame.service === ""
                                         && browseFrame.id === servicesFrameId
 
+  /// Services that can be linked and are not. Fetched from `link --json`,
+  /// which is the only listing that shows a service with no token - `browse`
+  /// and `search` both filter to what this machine can already reach.
+  property var linkableServices: []
+
+  /// The same local filter, over the linkable ones.
+  readonly property var shownLinkable: {
+    var needle = filterText.toLowerCase().trim()
+    if (needle === "") return linkableServices
+    var found = []
+    for (var i = 0; i < linkableServices.length; i++)
+      if (String(linkableServices[i]).toLowerCase().indexOf(needle) !== -1)
+        found.push(linkableServices[i])
+    return found
+  }
+
   // The same local filter every other list here gets.
   readonly property var shownServices: {
     var needle = filterText.toLowerCase().trim()
@@ -273,7 +289,15 @@ BarWidget {
         for (var s = 0; s < svcs.length; s++)
           out.push({ kind: "browseService",
                      item: { name: svcs[s], type: "", art_url: "", service: svcs[s] } })
-        if (svcs.length === 0)
+        // Then the ones that need an account. **This is the only surface where
+        // a service with no token is visible at all** - every other listing
+        // filters to what can already be reached, so an unlinked service is
+        // otherwise impossible to find, let alone link.
+        var offer = root.shownLinkable
+        for (var l = 0; l < offer.length; l++)
+          out.push({ kind: "linkService",
+                     item: { name: offer[l], type: "", art_url: "", service: offer[l] } })
+        if (svcs.length === 0 && offer.length === 0)
           out.push({ kind: "note",
                      item: { name: root.browseServices.length > 0
                                    ? strings.noMatch : strings.browseEmpty,
@@ -320,20 +344,21 @@ BarWidget {
       }
     }
 
+    // One door rather than one row per service. A household can reach dozens -
+    // 36 here - and a picker that lists a catalogue answers a different
+    // question from "what should this room play". First, above the saved items:
+    // it is one row and it never moves, so it is the one thing in this list
+    // whose position can be learned.
+    if (browseServices.length > 0 || root.linkableServices.length > 0)
+      rows.push({ kind: "servicesIndex",
+                  item: { name: strings.services, type: "", art_url: "" } })
+
     var favs = shownFavorites
     for (var i = 0; i < favs.length; i++) rows.push({ kind: "favorite", item: favs[i] })
     // After the household's own, because favorites are what a household shares
     // and these are what this machine happens to remember.
     var kept = shownBookmarks
     for (var k = 0; k < kept.length; k++) rows.push({ kind: "bookmark", item: kept[k] })
-
-    // One door rather than one row per service. A household can reach dozens -
-    // 32 here - and a picker that lists a catalogue answers a different
-    // question from "what should this room play". Listed after what is already
-    // in hand, because a name someone saved beats a tree they have to walk.
-    if (browseServices.length > 0)
-      rows.push({ kind: "servicesIndex",
-                  item: { name: strings.services, type: "", art_url: "" } })
 
     return rows
   }
@@ -350,7 +375,7 @@ BarWidget {
     return kind === "serviceHeader" || kind === "categoryHeader"
            || kind === "backToResults" || kind === "up" || kind === "search"
            || kind === "servicesIndex" || kind === "browseService"
-           || kind === "note"
+           || kind === "linkService" || kind === "note"
   }
 
   function rowActionable(row) {
@@ -656,6 +681,7 @@ BarWidget {
     else if (row.kind === "categoryHeader") root.expandCategory(row.item.category)
     else if (row.kind === "backToResults") root.closeServiceResults()
     else if (row.kind === "browseService") root.browseInto(row.item.service, "root", row.item.service)
+    else if (row.kind === "linkService") root.linkService(row.item.service)
     else if (row.kind === "container")
       // The row's own service when it has one - a container can arrive as a
       // *search* hit, with no browse frame open to inherit a service from.
@@ -1223,6 +1249,44 @@ BarWidget {
   // cached list the CLI keeps, so it costs no round trip until something is
   // actually chosen - the same rule the rest of this picker follows. Failure is
   // silent, like the accounts read: the fallback is the list already in hand.
+  // What could be linked and is not, for the one list that shows such a thing.
+  // Silent on failure like its neighbour: the fallback is an index with no link
+  // rows in it, which is exactly what this widget did before.
+  // The link itself. Long-running by nature - it waits for someone to finish in
+  // a browser - so nothing here waits on it; the lists are re-read when it ends.
+  Process {
+    id: linkProc
+    onExited: function(code) {
+      root.loadHouseholdServices()
+      root.loadLinkedServices()
+    }
+  }
+
+  Process {
+    id: linkableProc
+    command: [root.command, "link", "--json"]
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        if (!text || text.trim() === "") return
+        try {
+          var parsed = JSON.parse(text)
+          if (!Array.isArray(parsed)) return
+          var names = []
+          for (var i = 0; i < parsed.length; i++)
+            if (parsed[i] && !parsed[i].linked && parsed[i].name)
+              names.push(String(parsed[i].name))
+          names.sort(function(a, b) {
+            return a.toLowerCase() < b.toLowerCase() ? -1 : 1
+          })
+          root.linkableServices = names
+        } catch (e) {
+          // Leave whatever was already known.
+        }
+      }
+    }
+  }
+
   Process {
     id: servicesProc
     command: [root.command, "browse", "--json"]
@@ -1249,9 +1313,29 @@ BarWidget {
     }
   }
 
+  /// Start linking one service, which opens its login page in a browser.
+  ///
+  /// **This buys search and browse, not playback.** The token it stores is this
+  /// machine's; what makes a service's tracks *queue* is the household holding
+  /// its own account, which is added in the Sonos app and which nothing here can
+  /// do - `musicServiceAccounts:1 match` refuses every way it has been asked.
+  /// So the row says "link", and a linked service that still will not queue is
+  /// not a failure of this button.
+  ///
+  /// The picker closes: the next thing is a browser window, and a popup waiting
+  /// behind it for up to seven minutes helps nobody.
+  function linkService(service) {
+    if (!service || linkProc.running) return
+    linkProc.command = [root.command, "link", String(service)]
+    linkProc.running = true
+    root.closePicker()
+  }
+
   function loadHouseholdServices() {
-    if (servicesProc.running) return
-    servicesProc.running = true
+    if (!servicesProc.running) servicesProc.running = true
+    // Alongside it, because the index shows both and one without the other is
+    // half a list.
+    if (!linkableProc.running) linkableProc.running = true
   }
 
   // By name, which is what `bookmark` matches on, and which is unique enough:
@@ -2320,6 +2404,11 @@ BarWidget {
     // inch away, and the picker is narrow enough that repeating it crowds out
     // the service names that are actually long.
     "more": "More",
+    // On a service in the index that has no account here. Deliberately not
+    // "register": linking stores this machine's token, which buys search and
+    // browse. What makes a service's tracks queue is the household holding its
+    // own account, added in the Sonos app, and nothing here can do that.
+    "link": "Link",
     // The second step a category heading offers, once its page is on screen and
     // the service still had rows beyond it. Says "all" because it means it -
     // bounded only by `searchCategoryAll`.
@@ -3515,6 +3604,14 @@ BarWidget {
           // so the count is about it and nothing else.
           if (root.browsing) {
             if (root.browseStatus !== "") return root.browseStatus
+            // The index answers itself rather than fetching, so it has no browse
+            // items to count - it was reading 0 of 0 with rows on screen.
+            if (root.browsingIndex) {
+              var shown = root.shownServices.length + root.shownLinkable.length
+              var all = root.browseServices.length + root.linkableServices.length
+              return shown + (root.filterText !== ""
+                              ? " " + root.strings.of + " " + all : "")
+            }
             var here = root.shownBrowseItems.length
             return here + (root.filterText !== ""
                            ? " " + root.strings.of + " " + root.browseItems.length : "")
@@ -3689,6 +3786,7 @@ BarWidget {
             anchors.rightMargin: Style.space(8)
             visible: entry.kind === "container" || entry.kind === "browseService"
                      || entry.kind === "servicesIndex" || entry.kind === "serviceHeader"
+                     || entry.kind === "linkService"
                      || (entry.kind === "categoryHeader" && entry.payload.more !== "")
             text: "›"
             color: root.secondaryFg
@@ -3703,11 +3801,13 @@ BarWidget {
             anchors.verticalCenter: parent.verticalCenter
             anchors.right: entryInto.left
             anchors.rightMargin: Style.space(3)
-            visible: entry.kind === "serviceHeader"
+            visible: entry.kind === "serviceHeader" || entry.kind === "linkService"
                      || (entry.kind === "categoryHeader" && entry.payload.more !== "")
             // A category heading says which step pressing it takes; a service
             // heading only ever does the one thing.
-            text: entry.kind === "categoryHeader" ? entry.payload.more : root.strings.more
+            text: entry.kind === "categoryHeader" ? entry.payload.more
+                  : entry.kind === "linkService" ? root.strings.link
+                  : root.strings.more
             color: root.secondaryFg
             font.family: root.bar.fontFamily
             font.pixelSize: Style.font.caption
