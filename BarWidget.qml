@@ -89,6 +89,13 @@ BarWidget {
 
   /// The room the picker is choosing for; empty when the picker is closed.
   property string pickingFor: ""
+  // One service's whole answer, grouped by category - the second surface of the
+  // mobile model. Its own state rather than a browse frame: a frame holds a
+  // container path, and this holds search results, which go back to the merged
+  // list rather than one level up a tree.
+  property string serviceResultsFor: ""
+  property var serviceResults: []
+  property string serviceResultsStatus: ""
   property string filterText: ""
   property int selectedIndex: 0
 
@@ -211,6 +218,21 @@ BarWidget {
   // chosen. Searching on every keystroke would put a network round trip behind
   // typing, which is the behaviour this widget exists to avoid.
   readonly property var pickerRows: {
+    // One service's results own the whole list while they are open, for the same
+    // reason a container does: mixing anything else in would make "back"
+    // ambiguous. Checked first because this is not a browse frame.
+    if (serviceResultsFor !== "") {
+      var mine = [{ kind: "backToResults",
+                    item: { name: strings.up.arg(searchLabel()), type: "", art_url: "" } }]
+      // Not filtered by `filterText`, unlike every other list here, because that
+      // box still holds the search term: filtering "garth brooks" over his own
+      // results would hide "The Dance" for not repeating his name.
+      if (serviceResults.length > 0) root.appendByCategory(mine, serviceResults)
+      else if (serviceResultsStatus === "")
+        mine.push({ kind: "note",
+                    item: { name: noResultsLabel(), type: "", art_url: "" } })
+      return mine
+    }
     // Inside a container the list is that container and nothing else. Mixing
     // favorites into it would make "back" ambiguous and the count meaningless.
     if (browsing) {
@@ -265,13 +287,12 @@ BarWidget {
     if (searchEnabled && term !== "") {
       if (searchedTerm === term) {
         var hits = searchResults
-        // A hit is not always a thing to play. Every Mixcloud search result is a
-        // `tag:` collection, so a search can answer entirely in places - and
-        // offering one as a track would hand a container id to `play-item`.
-        for (var j = 0; j < hits.length; j++)
-          rows.push({ kind: hits[j].container ? "container" : "result", item: hits[j] })
         if (hits.length === 0)
           rows.push({ kind: "note", item: { name: noResultsLabel(), type: "", art_url: "" } })
+        else if (root.searchMerged)
+          root.appendByService(rows, hits)
+        else
+          root.appendHits(rows, hits)
       } else {
         rows.push({
           kind: "search",
@@ -296,6 +317,140 @@ BarWidget {
                   item: { name: strings.services, type: "", art_url: "" } })
 
     return rows
+  }
+
+  /// Whether a row can be pressed. Headings and notes are read, not chosen.
+  ///
+  /// The list holds them inline rather than in a separate section, which is what
+  /// lets one keyboard path walk the whole thing - but only if the arrows step
+  /// over them, which is what [`stepSelection`](stepSelection) is for.
+  function rowActionable(row) {
+    return !!row && row.kind !== "note"
+           && row.kind !== "serviceHeader" && row.kind !== "categoryHeader"
+  }
+
+  /// The next row in `delta`'s direction that can actually be pressed.
+  ///
+  /// Stops at the end rather than wrapping, and stays put when there is nothing
+  /// further - the same as walking off either end of a plain list. Falling back
+  /// to where it started matters for a list that is *all* headings, which a
+  /// service answering nothing would give.
+  function stepSelection(delta) {
+    var items = root.pickerRows
+    for (var i = root.selectedIndex + delta; i >= 0 && i < items.length; i += delta)
+      if (root.rowActionable(items[i])) return i
+    return root.selectedIndex
+  }
+
+  /// The first row worth selecting, for when a list has just been rebuilt.
+  ///
+  /// A merged search now leads with a service heading, so leaving the selection
+  /// at zero would put it on a row that does nothing when pressed.
+  function firstActionable() {
+    var items = root.pickerRows
+    for (var i = 0; i < items.length; i++)
+      if (root.rowActionable(items[i])) return i
+    return 0
+  }
+
+  /// Open one service's whole answer, grouped by category.
+  ///
+  /// A second search rather than a filter of the rows already held: the merged
+  /// list only ever carried the few that survived `--per-service`, so the rest
+  /// were never fetched. `--per-service 0` lifts the cap, and naming every
+  /// standard category asks for the shelves the top-level sample could not show.
+  function openServiceResults(service) {
+    if (!service || serviceResultsProc.running) return
+    root.serviceResultsFor = String(service)
+    root.serviceResults = []
+    root.serviceResultsStatus = root.strings.searching
+    root.selectedIndex = 0
+    serviceResultsProc.command = [root.command, "search", "-s", String(service),
+                                  "-c", root.searchAllCategories,
+                                  "--per-service", "0",
+                                  "--count", String(root.searchCount),
+                                  "--json", root.searchedTerm]
+    serviceResultsProc.running = true
+  }
+
+  function closeServiceResults() {
+    root.serviceResultsFor = ""
+    root.serviceResults = []
+    root.serviceResultsStatus = ""
+    root.selectedIndex = 0
+  }
+
+  /// One service's rows under a heading per category.
+  ///
+  /// **Bucketed, not scanned.** The CLI interleaves a service's categories, so
+  /// its rows arrive track, artist, album, track, artist, album - consecutive
+  /// runs are one row long, and walking them would print a heading above every
+  /// single result. Categories keep the order they first appear in, which is the
+  /// priority order `pick_categories` applied: tracks, then artists, then albums.
+  function appendByCategory(rows, hits) {
+    var order = []
+    var buckets = ({})
+    for (var i = 0; i < hits.length; i++) {
+      var category = String(hits[i].category || "")
+      if (buckets[category] === undefined) {
+        buckets[category] = []
+        order.push(category)
+      }
+      buckets[category].push(hits[i])
+    }
+    for (var k = 0; k < order.length; k++) {
+      rows.push({ kind: "categoryHeader",
+                  item: { name: root.categoryLabel(order[k]), type: "", art_url: "" } })
+      root.appendHits(rows, buckets[order[k]])
+    }
+  }
+
+  /// A category's heading. Sonos standardised the names, so the common ones get
+  /// a word of their own; anything else is shown as the service spelled it,
+  /// rather than forced into a bucket it may not belong in.
+  function categoryLabel(category) {
+    var key = "kind" + category.charAt(0).toUpperCase() + category.slice(1).toLowerCase()
+    return root.strings[key] || category
+  }
+
+  /// Hits as plain rows, which is what a single-service search wants.
+  ///
+  /// A hit is not always a thing to play. Every Mixcloud search result is a
+  /// `tag:` collection, so a search can answer entirely in places - and offering
+  /// one as a track would hand a container id to `play-item`.
+  function appendHits(rows, hits) {
+    for (var i = 0; i < hits.length; i++)
+      rows.push({ kind: hits[i].container ? "container" : "result", item: hits[i] })
+  }
+
+  /// Merged hits under one heading per service, the shape Sonos's mobile app
+  /// uses: a service name, the few rows it contributed, then a way to see the
+  /// rest of what it found.
+  ///
+  /// The CLI has already interleaved each service's categories and capped them,
+  /// so the order here is only ever preserved - grouping re-reads it rather than
+  /// re-deciding it. Services keep the order the CLI sorted them into, linked
+  /// first, so the loop walks the hits rather than the service list.
+  function appendByService(rows, hits) {
+    var at = 0
+    while (at < hits.length) {
+      var service = String(hits[at].service || "")
+      var group = []
+      while (at < hits.length && String(hits[at].service || "") === service) {
+        group.push(hits[at])
+        at++
+      }
+      rows.push({ kind: "serviceHeader",
+                  item: { name: service, type: "", art_url: "", service: service } })
+      root.appendHits(rows, group)
+      // Offered whenever the service filled its quota, because that is the only
+      // signal here that it had more to give: the cap is applied before this
+      // ever sees the rows, so a short group genuinely ran out.
+      if (group.length >= root.searchPerService)
+        rows.push({ kind: "moreFromService",
+                    item: { name: root.strings.moreFrom.arg(service),
+                            type: "", art_url: "", service: service } })
+    }
   }
 
   /// Which service a row belongs to, or "" when nothing can say.
@@ -348,6 +503,8 @@ BarWidget {
     else if (row.kind === "result") root.playSearchResult(root.pickingFor, row.item)
     else if (row.kind === "search") root.runSearch()
     else if (row.kind === "servicesIndex") root.openServicesIndex()
+    else if (row.kind === "moreFromService") root.openServiceResults(row.item.service)
+    else if (row.kind === "backToResults") root.closeServiceResults()
     else if (row.kind === "browseService") root.browseInto(row.item.service, "root", row.item.service)
     else if (row.kind === "container")
       // The row's own service when it has one - a container can arrive as a
@@ -418,6 +575,10 @@ BarWidget {
     root.searchStatus = ""
     root.searchedTerm = ""
     root.pendingTerm = ""
+    // The drill-in belongs to a search; without this, closing the picker and
+    // reopening it would land inside one service's results for a term that is
+    // no longer typed anywhere.
+    root.closeServiceResults()
   }
 
   /// This session's own night/speech toggles, keyed `<room>:<metadata key>`.
@@ -569,7 +730,9 @@ BarWidget {
         // a slow answer from appearing under a query nobody made.
         root.searchedTerm = root.pendingTerm
         root.searchStatus = ""
-        root.selectedIndex = 0
+        // Not zero: a merged list leads with a service heading, and leaving the
+        // selection on it would make Enter do nothing.
+        root.selectedIndex = root.firstActionable()
       }
     }
   }
@@ -585,13 +748,49 @@ BarWidget {
                    "--count", String(root.searchCount)]
     if (!root.searchMerged) command.push("-s", root.searchService)
     else if (root.searchOnlyLinked) command.push("--only-linked")
-    // Without this the CLI searches the service's default category, which for
-    // a service with no "all" is whatever its presentation map lists first -
-    // Plex leads with artists, and a song title searched there finds nothing.
+    // A list in priority order, passed through as the CLI takes it. Left empty
+    // the CLI picks for itself: the service's `all` where it declares one, else
+    // tracks, artists and albums, else whatever it lists first. Setting it is
+    // worth doing for a library-shaped service - Plex has no `all` and leads
+    // with artists, so a song title typed at it finds nothing.
     if (root.searchCategory !== "") command.push("-c", root.searchCategory)
+    // How many rows one service contributes once its categories are
+    // interleaved. Only meaningful merged, where a heading is drawn per service
+    // and this is what sits under it.
+    if (root.searchMerged) command.push("--per-service", String(root.searchPerService))
     command.push(term)
     searchProc.command = command
     searchProc.running = true
+  }
+
+  // Its own Process, for the reason searchProc has one: this leaves the LAN, and
+  // a service that hangs must not reach anything the daemon does.
+  Process {
+    id: serviceResultsProc
+    onExited: function(code) {
+      if (code !== 0) root.serviceResultsStatus = root.searchFailure()
+    }
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        if (!text || text.trim() === "") return
+        var parsed
+        try {
+          parsed = JSON.parse(text)
+        } catch (e) {
+          root.serviceResultsStatus = root.searchFailure()
+          return
+        }
+        var items = root.itemsIn(parsed)
+        if (items === null) {
+          root.serviceResultsStatus = root.searchFailure()
+          return
+        }
+        root.serviceResults = items
+        root.serviceResultsStatus = ""
+        root.selectedIndex = root.firstActionable()
+      }
+    }
   }
 
   // Its own Process again, for the reasons searchProc has one: browsing leaves
@@ -1920,6 +2119,24 @@ BarWidget {
     // A merged search names no one service, so it cannot blame one either: the
     // CLI reports the services that timed out on stderr, which is not read here.
     "searchFailed": "Search failed",
+    // The row under a service's few hits that opens the rest of them. %1 is the
+    // service, because by then the heading has scrolled away.
+    "moreFrom": "More from %1",
+    // Category headings inside one service's results. Sonos standardised these
+    // names, so a service's own id maps onto one of them; anything unrecognised
+    // is shown as the service spelled it rather than forced into a bucket.
+    // Keyed by the **category id**, which is not always the word Sonos shows:
+    // the id is `tracks` and the app's heading is "Songs". Getting that wrong
+    // shows the raw id, which is how it was caught.
+    "kindArtists": "Artists",
+    "kindTracks": "Songs",
+    "kindAlbums": "Albums",
+    "kindPlaylists": "Playlists",
+    "kindStations": "Stations",
+    "kindPodcasts": "Podcasts",
+    // The Universal Search category, which a handful of services declare and
+    // which means "whatever we found" rather than a kind of thing.
+    "kindAll": "Everything",
     // Names what found nothing, because the note sits above the favorites and
     // bookmarks that may well have matched: a bare "Nothing found" at the top of
     // a list with a playable row under it is simply wrong. %1 is the service, or
@@ -2060,6 +2277,14 @@ BarWidget {
   // has one, else its first category). Worth setting for a library-shaped
   // service: "tracks" is what a song title typed into a picker means on Plex.
   readonly property string searchCategory: String(setting("searchCategory", "") || "")
+  // Rows beneath one service's heading, before "more from" offers the rest.
+  // Three is what Sonos's own mobile app shows, and about as many as anyone
+  // reads per service when twenty of them answered.
+  readonly property int searchPerService: Math.max(1, Number(setting("searchPerService", 3)) || 3)
+  // Every standard Sonos category name, sent on the drill-in. The CLI skips the
+  // ones a service does not have, so naming them all is how "everything this
+  // service found" is asked for without the widget knowing what it publishes.
+  readonly property string searchAllCategories: "tracks,artists,albums,playlists,stations,podcasts"
 
   // Which services the picker offers to walk. A service's own containers - a
   // personal library, a "For You", a genre tree - are the half of a linked
@@ -3053,12 +3278,19 @@ BarWidget {
         anchors.right: parent.right
         visible: root.favoritesLoaded || root.bookmarksLoaded
                  || root.searchStatus !== "" || root.browsing
+                 || root.serviceResultsFor !== ""
         // The status goes here rather than over the list: a search that is
         // running, or that failed, must not take away the rows already shown.
         // The favorites status joins it whenever the list is up, so a failed
         // favorites load is still reported instead of being swallowed by the
         // rows that survived it.
         text: {
+          // Inside one service's results the count is about that service, for
+          // the same reason a container's is about the container.
+          if (root.serviceResultsFor !== "") {
+            if (root.serviceResultsStatus !== "") return root.serviceResultsStatus
+            return String(root.serviceResults.length)
+          }
           // Inside a container, everything on screen belongs to that container,
           // so the count is about it and nothing else.
           if (root.browsing) {
@@ -3106,14 +3338,17 @@ BarWidget {
           if (event.key === Qt.Key_Escape) {
             root.closePicker()
           } else if ((event.key === Qt.Key_Backspace || event.key === Qt.Key_Left)
+                     && text === "" && root.serviceResultsFor !== "") {
+            root.closeServiceResults()
+          } else if ((event.key === Qt.Key_Backspace || event.key === Qt.Key_Left)
                      && root.browsing && text === "") {
             // Only on an empty field. Both keys mean something to a text cursor,
             // and a filter someone is still editing outranks navigation.
             root.browseUp()
           } else if (event.key === Qt.Key_Down) {
-            root.selectedIndex = Math.min(root.selectedIndex + 1, Math.max(0, items.length - 1))
+            root.selectedIndex = root.stepSelection(1)
           } else if (event.key === Qt.Key_Up) {
-            root.selectedIndex = Math.max(root.selectedIndex - 1, 0)
+            root.selectedIndex = root.stepSelection(-1)
           } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
             if (items.length > 0)
               root.activateRow(items[root.selectedIndex])
@@ -3171,7 +3406,7 @@ BarWidget {
           readonly property var payload: entry.modelData.item
           readonly property string kind: entry.modelData.kind
           /// A note is a sentence, not a thing to play.
-          readonly property bool actionable: entry.kind !== "note"
+          readonly property bool actionable: root.rowActionable(entry)
 
           width: ListView.view.width
           height: Math.max(entryText.implicitHeight, root.showArt ? entryArt.size : 0)
