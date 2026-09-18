@@ -215,8 +215,11 @@ BarWidget {
   // concatenation rather than a translation.
   //
   // The search row is an *action*, not a result: nothing is sent until it is
-  // chosen. Searching on every keystroke would put a network round trip behind
-  // typing, which is the behaviour this widget exists to avoid.
+  // chosen, or until typing stops for `searchDelay`. Searching on every
+  // keystroke would put a network round trip behind typing, which is the
+  // behaviour this widget exists to avoid - one request per pause is not that,
+  // and the row stays visible while the pause is being waited out, so what is
+  // about to happen is on screen and Enter still does it now.
   readonly property var pickerRows: {
     // One service's results own the whole list while they are open, for the same
     // reason a container does: mixing anything else in would make "back"
@@ -324,9 +327,20 @@ BarWidget {
   /// The list holds them inline rather than in a separate section, which is what
   /// lets one keyboard path walk the whole thing - but only if the arrows step
   /// over them, which is what [`stepSelection`](stepSelection) is for.
+  /// A row that is scaffolding rather than a thing: a heading, a way in, a way
+  /// back. They carry no art and no second line, whether or not they can be
+  /// pressed.
+  function structuralRow(kind) {
+    return kind === "serviceHeader" || kind === "categoryHeader"
+           || kind === "backToResults" || kind === "up" || kind === "search"
+           || kind === "servicesIndex" || kind === "browseService"
+           || kind === "note"
+  }
+
   function rowActionable(row) {
-    return !!row && row.kind !== "note"
-           && row.kind !== "serviceHeader" && row.kind !== "categoryHeader"
+    // A service heading opens that service; a category heading inside one is
+    // only a label, because its rows are already all there.
+    return !!row && row.kind !== "note" && row.kind !== "categoryHeader"
   }
 
   /// The next row in `delta`'s direction that can actually be pressed.
@@ -463,16 +477,14 @@ BarWidget {
         group.push(hits[at])
         at++
       }
+      // The heading *is* the way in, rather than a row that does nothing above a
+      // row that does the going. It is always offered, because the drill-in is
+      // not just "the rest of these": it asks every category the service has -
+      // playlists, stations, podcasts - where the top level asked three, and it
+      // regroups by category. There is always more behind it than is shown.
       rows.push({ kind: "serviceHeader",
                   item: { name: service, type: "", art_url: "", service: service } })
       root.appendHits(rows, group)
-      // Offered whenever the service filled its quota, because that is the only
-      // signal here that it had more to give: the cap is applied before this
-      // ever sees the rows, so a short group genuinely ran out.
-      if (group.length >= root.searchPerService)
-        rows.push({ kind: "moreFromService",
-                    item: { name: root.strings.moreFrom.arg(service),
-                            type: "", art_url: "", service: service } })
     }
   }
 
@@ -535,7 +547,7 @@ BarWidget {
     else if (row.kind === "result") root.playSearchResult(root.pickingFor, row.item)
     else if (row.kind === "search") root.runSearch()
     else if (row.kind === "servicesIndex") root.openServicesIndex()
-    else if (row.kind === "moreFromService") root.openServiceResults(row.item.service)
+    else if (row.kind === "serviceHeader") root.openServiceResults(row.item.service)
     else if (row.kind === "backToResults") root.closeServiceResults()
     else if (row.kind === "browseService") root.browseInto(row.item.service, "root", row.item.service)
     else if (row.kind === "container")
@@ -760,7 +772,38 @@ BarWidget {
     }
   }
 
+  // Restarted on every keystroke, so it only fires once typing stops. Its own
+  // object rather than a flag on the field: the field should not have to know
+  // what a search costs.
+  Timer {
+    id: searchAfterTyping
+    interval: root.searchDelay
+    repeat: false
+    onTriggered: {
+      // A search already in flight is not a reason to drop this one - the term
+      // has moved on since it started - so wait for it rather than give up.
+      if (searchProc.running) return searchAfterTyping.restart()
+      root.runSearch()
+    }
+  }
+
+  /// Arm the delay, or stand down, for whatever is now in the filter box.
+  ///
+  /// Nothing to search, already searched, or sitting inside one service's
+  /// results - where the box holds the term and nothing reads it - all mean the
+  /// timer should not be running at all.
+  function armSearch() {
+    var term = root.filterText.trim()
+    if (root.searchDelay === 0 || !root.searchEnabled || term === ""
+        || root.searchedTerm === term || root.serviceResultsFor !== "") {
+      searchAfterTyping.stop()
+      return
+    }
+    searchAfterTyping.restart()
+  }
+
   function runSearch() {
+    searchAfterTyping.stop()
     var term = root.filterText.trim()
     if (term === "" || !root.searchEnabled || searchProc.running) return
     root.pendingTerm = term
@@ -2152,9 +2195,11 @@ BarWidget {
     // A merged search names no one service, so it cannot blame one either: the
     // CLI reports the services that timed out on stderr, which is not read here.
     "searchFailed": "Search failed",
-    // The row under a service's few hits that opens the rest of them. %1 is the
-    // service, because by then the heading has scrolled away.
-    "moreFrom": "More from %1",
+    // On the right of a service heading, which is what opens that service's
+    // whole answer. Not "More from Deezer": the heading's left says Deezer an
+    // inch away, and the picker is narrow enough that repeating it crowds out
+    // the service names that are actually long.
+    "more": "More",
     // Category headings inside one service's results. Sonos standardised these
     // names, so a service's own id maps onto one of them; anything unrecognised
     // is shown as the service spelled it rather than forced into a bucket.
@@ -2313,6 +2358,12 @@ BarWidget {
   // Rows beneath one service's heading, before "more from" offers the rest.
   // Three is what Sonos's own mobile app shows, and about as many as anyone
   // reads per service when twenty of them answered.
+  // How long typing must stop before a merged search runs itself, in
+  // milliseconds. Long enough that a word typed at speed is one request, short
+  // enough not to feel like waiting. 0 turns it off and leaves the search row as
+  // the only way in, which is what this did before.
+  readonly property int searchDelay: Math.max(0, Number(setting("searchDelay", 600)) || 0)
+
   readonly property int searchPerService: Math.max(1, Number(setting("searchPerService", 3)) || 3)
   // Every standard Sonos category name, sent on the drill-in. The CLI skips the
   // ones a service does not have, so naming them all is how "everything this
@@ -3361,6 +3412,7 @@ BarWidget {
           // and this goes first so `onPickerRowsChanged` can settle it.
           root.selectedIndex = 0
           root.filterText = text
+          root.armSearch()
           // A stale "could not reach" under a query nobody has run yet reads as
           // if the new text had already failed.
           if (root.searchStatus !== "" && !searchProc.running) root.searchStatus = ""
@@ -3483,11 +3535,9 @@ BarWidget {
             // placeholder speaker beside them would read as a thing to play.
             // A container often does have art - services give their own
             // sections icons - so it keeps its tile.
-            visible: root.showArt && entry.kind !== "search" && entry.kind !== "note"
-                     && entry.kind !== "browseService" && entry.kind !== "up"
-                     && entry.kind !== "servicesIndex"
-                     && entry.kind !== "serviceHeader" && entry.kind !== "categoryHeader"
-                     && entry.kind !== "moreFromService" && entry.kind !== "backToResults"
+            // A container often does have art - services give their own sections
+            // icons - so it keeps its tile; scaffolding never does.
+            visible: root.showArt && !root.structuralRow(entry.kind)
             url: entry.payload.art_url || ""
             placeholder: root.glyphs.speaker
             foreground: root.bar.foreground
@@ -3504,11 +3554,25 @@ BarWidget {
             anchors.right: parent.right
             anchors.rightMargin: Style.space(8)
             visible: entry.kind === "container" || entry.kind === "browseService"
-                     || entry.kind === "servicesIndex"
+                     || entry.kind === "servicesIndex" || entry.kind === "serviceHeader"
             text: "›"
             color: root.secondaryFg
             font.family: root.bar.fontFamily
             font.pixelSize: Style.font.body
+          }
+
+          // What the chevron beside it will do, on a service heading only. The
+          // heading names the service and this names the action, which is the
+          // pair the mobile app puts at the top of each of its groups.
+          Text {
+            anchors.verticalCenter: parent.verticalCenter
+            anchors.right: entryInto.left
+            anchors.rightMargin: Style.space(3)
+            visible: entry.kind === "serviceHeader"
+            text: root.strings.more
+            color: root.secondaryFg
+            font.family: root.bar.fontFamily
+            font.pixelSize: Style.font.caption
           }
 
           // Add to the queue rather than play now, on the right where the row
@@ -3598,7 +3662,11 @@ BarWidget {
               // Inside a container the service is already in the title, so the
               // second line is the kind alone rather than "stream · iHeartRadio"
               // on every one of fifty rows.
-              text: !entry.actionable ? ""
+              // Structural rows say everything on their one line. A service
+              // heading carries its service so that pressing it knows where to
+              // go, and the subtitle would otherwise print that name a second
+              // time directly beneath itself.
+              text: !entry.actionable || root.structuralRow(entry.kind) ? ""
                     : root.browsing ? root.browseSubtitle(entry.payload)
                     : root.favoriteSubtitle(entry.payload)
               color: root.secondaryFg
