@@ -1730,6 +1730,11 @@ BarWidget {
       // A kind nobody has named still reads as itself rather than vanishing.
       parts.push(root.strings[key] || raw.toLowerCase())
     }
+    // The artist, where the hit has one. This is the line that tells four rows
+    // reading "Moon River" apart, which a merged search makes the common case
+    // rather than a curiosity: the same song title comes back from every
+    // service at once. Favorites rarely carry one, and nothing is shown then.
+    if (favorite.description) parts.push(String(favorite.description))
     // Service names are brands; they stay as the service spells them.
     if (favorite.service) parts.push(favorite.service)
     return parts.join(" · ")
