@@ -96,9 +96,14 @@ BarWidget {
   property string serviceResultsFor: ""
   property var serviceResults: []
   property string serviceResultsStatus: ""
-  /// Category ids whose rows are all shown. Emptied whenever a drill-in opens or
-  /// closes, because it describes this look at this service and nothing longer.
-  property var expandedCategories: []
+  /// How far each category has been opened: absent is the short list, `"page"`
+  /// is `searchCategoryCount` of them, `"all"` is everything fetched. Emptied
+  /// whenever a drill-in opens or closes, because it describes this look at this
+  /// service and nothing longer.
+  property var categoryState: ({})
+  /// The `--count` the rows on screen were fetched with, so **Show all** knows
+  /// whether it must fetch deeper or merely reveal what is already here.
+  property int serviceResultsDepth: 0
   property string filterText: ""
   property int selectedIndex: 0
 
@@ -345,7 +350,7 @@ BarWidget {
     // A service heading always opens that service. A category heading is only a
     // label once everything it has is on screen - until then it is the way to
     // the rest of it.
-    if (row.kind === "categoryHeader") return !!row.item.more
+    if (row.kind === "categoryHeader") return row.item.more !== ""
     return true
   }
 
@@ -390,16 +395,29 @@ BarWidget {
   /// were never fetched. `--per-service 0` lifts the cap, and naming every
   /// standard category asks for the shelves the top-level sample could not show.
   function openServiceResults(service) {
+    root.categoryState = ({})
+    root.serviceResults = []
+    root.selectedIndex = 0
+    // One more than a category will ever show at this tier: the extra row is the
+    // only way to know whether "Show all" has anything to offer.
+    root.fetchServiceResults(service, root.searchCategoryCount + 1)
+  }
+
+  /// Ask one service for everything it has, `depth` rows per category.
+  ///
+  /// Rows already on screen are left alone while a deeper fetch runs - this is
+  /// called again by **Show all**, and blanking the list someone is reading in
+  /// order to show them more of it would be a strange way to do it. The status
+  /// line says what is happening.
+  function fetchServiceResults(service, depth) {
     if (!service || serviceResultsProc.running) return
     root.serviceResultsFor = String(service)
-    root.serviceResults = []
-    root.expandedCategories = []
+    root.serviceResultsDepth = depth
     root.serviceResultsStatus = root.strings.searching
-    root.selectedIndex = 0
     serviceResultsProc.command = [root.command, "search", "-s", String(service),
                                   "-c", root.searchAllCategories,
                                   "--per-service", "0",
-                                  "--count", String(root.searchCategoryCount),
+                                  "--count", String(depth),
                                   "--json", root.searchedTerm]
     serviceResultsProc.running = true
   }
@@ -409,7 +427,8 @@ BarWidget {
     root.serviceResultsFor = ""
     root.serviceResults = []
     root.serviceResultsStatus = ""
-    root.expandedCategories = []
+    root.categoryState = ({})
+    root.serviceResultsDepth = 0
   }
 
   /// One service's rows under a heading per category.
@@ -431,26 +450,55 @@ BarWidget {
       buckets[category].push(hits[i])
     }
     for (var k = 0; k < order.length; k++) {
-      var bucket = buckets[order[k]]
-      // Shown short by default, because six categories at their full depth is a
-      // list nobody scans. **More ›** reveals the rest of one category from rows
-      // already in hand - `searchCategoryCount` fetched them - so it costs
-      // nothing and cannot fail halfway.
-      var whole = root.expandedCategories.indexOf(order[k]) !== -1
-      var shown = whole ? bucket : bucket.slice(0, root.searchPerCategory)
+      var id = order[k]
+      var bucket = buckets[id]
+      // Three tiers, because six categories at full depth is a list nobody
+      // scans: a short list, then `searchCategoryCount` of them, then whatever a
+      // deeper fetch brought back. The first step is a local reveal from rows
+      // already in hand; only the last one asks the service for more.
+      var state = root.categoryState[id]
+      var cap = state === "all" ? bucket.length
+              : state === "page" ? root.searchCategoryCount
+              : root.searchPerCategory
+      var shown = bucket.slice(0, cap)
       rows.push({ kind: "categoryHeader",
-                  item: { name: root.categoryLabel(order[k]), type: "", art_url: "",
-                          category: order[k], more: shown.length < bucket.length } })
+                  item: { name: root.categoryLabel(id), type: "", art_url: "",
+                          category: id,
+                          more: root.categoryStep(state, bucket.length) } })
       root.appendHits(rows, shown)
     }
   }
 
-  /// Show the rest of one category, in place.
+  /// What pressing this category heading would do next, or "" for one with
+  /// nothing left to give.
+  ///
+  /// Decided by which tier it is on rather than by whether rows are hidden,
+  /// because on the middle tier both are true at once: a page is showing *and*
+  /// there is more behind it, and saying "More" there would promise the small
+  /// local reveal that has already happened.
+  function categoryStep(state, held) {
+    if (state === "all") return ""
+    if (state === "page")
+      return held > root.searchCategoryCount ? root.strings.showAll : ""
+    return held > root.searchPerCategory ? root.strings.more : ""
+  }
+
+  /// Open one category by one step: short list to page, page to everything.
+  ///
+  /// The second step needs rows nobody has fetched, so it asks again and deeper
+  /// - once, for every category, because the drill-in asks them all together and
+  /// a person who wants all of one usually wants all of the next as well.
   function expandCategory(category) {
-    if (!category || root.expandedCategories.indexOf(category) !== -1) return
-    // Reassigned rather than pushed into: QML only re-evaluates what depends on
-    // a list property when the property itself is set.
-    root.expandedCategories = root.expandedCategories.concat([category])
+    if (!category) return
+    var state = root.categoryState[category]
+    // Copied rather than mutated: QML only re-evaluates what depends on an
+    // object property when the property itself is set.
+    var next = ({})
+    for (var k in root.categoryState) next[k] = root.categoryState[k]
+    next[category] = state === "page" ? "all" : "page"
+    root.categoryState = next
+    if (next[category] === "all" && root.serviceResultsDepth < root.searchCategoryAll)
+      root.fetchServiceResults(root.serviceResultsFor, root.searchCategoryAll)
   }
 
   /// A category's heading. Sonos standardised the names, so the common ones get
@@ -2225,6 +2273,10 @@ BarWidget {
     // inch away, and the picker is narrow enough that repeating it crowds out
     // the service names that are actually long.
     "more": "More",
+    // The second step a category heading offers, once its page is on screen and
+    // the service still had rows beyond it. Says "all" because it means it -
+    // bounded only by `searchCategoryAll`.
+    "showAll": "Show all",
     // Category headings inside one service's results. Sonos standardised these
     // names, so a service's own id maps onto one of them; anything unrecognised
     // is shown as the service spelled it rather than forced into a bucket.
@@ -2393,11 +2445,15 @@ BarWidget {
   // **More ›** offers the rest. Four, because six categories at four apiece is
   // already a screenful and the point of the grouping is to be scannable.
   readonly property int searchPerCategory: Math.max(1, Number(setting("searchPerCategory", 4)) || 4)
-  // How deep the drill-in fetches each category. Larger than `searchCount`,
-  // which is tuned for a merged search showing three rows a service: here the
-  // rows behind "More" have to already be in hand, since expanding is a local
-  // reveal rather than another round trip.
+  // Rows one category shows once **More ›** has been pressed. The drill-in
+  // fetches one more than this, and that extra row is never displayed - it is
+  // there to answer "is there more?", which nothing else can: the envelope's
+  // `total` is summed across every category, so it cannot speak for one.
   readonly property int searchCategoryCount: Math.max(1, Number(setting("searchCategoryCount", 20)) || 20)
+  // The ceiling on **Show all ›**, which re-fetches deeper. Arbitrary on
+  // purpose: past a hundred rows of one category nobody is reading, they are
+  // searching again.
+  readonly property int searchCategoryAll: Math.max(1, Number(setting("searchCategoryAll", 100)) || 100)
 
   readonly property int searchPerService: Math.max(1, Number(setting("searchPerService", 3)) || 3)
   // Every standard Sonos category name, sent on the drill-in. The CLI skips the
@@ -3590,7 +3646,7 @@ BarWidget {
             anchors.rightMargin: Style.space(8)
             visible: entry.kind === "container" || entry.kind === "browseService"
                      || entry.kind === "servicesIndex" || entry.kind === "serviceHeader"
-                     || (entry.kind === "categoryHeader" && !!entry.payload.more)
+                     || (entry.kind === "categoryHeader" && entry.payload.more !== "")
             text: "›"
             color: root.secondaryFg
             font.family: root.bar.fontFamily
@@ -3605,8 +3661,10 @@ BarWidget {
             anchors.right: entryInto.left
             anchors.rightMargin: Style.space(3)
             visible: entry.kind === "serviceHeader"
-                     || (entry.kind === "categoryHeader" && !!entry.payload.more)
-            text: root.strings.more
+                     || (entry.kind === "categoryHeader" && entry.payload.more !== "")
+            // A category heading says which step pressing it takes; a service
+            // heading only ever does the one thing.
+            text: entry.kind === "categoryHeader" ? entry.payload.more : root.strings.more
             color: root.secondaryFg
             font.family: root.bar.fontFamily
             font.pixelSize: Style.font.caption
