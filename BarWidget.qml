@@ -96,12 +96,6 @@ BarWidget {
   property string serviceResultsFor: ""
   property var serviceResults: []
   property string serviceResultsStatus: ""
-  /// Which service the reply in flight was asked for, so one that arrives after
-  /// the surface has been left is dropped rather than reopening it. The same
-  /// guard `searchProc` keeps with `pendingTerm` and `browseProc` with
-  /// `browseKey`, for the same reason: a slow answer must not land on a list
-  /// nobody is looking at, moving the selection under someone's cursor.
-  property string serviceResultsPending: ""
   property string filterText: ""
   property int selectedIndex: 0
 
@@ -348,10 +342,20 @@ BarWidget {
     return root.selectedIndex
   }
 
-  /// The first row worth selecting, for when a list has just been rebuilt.
+  /// Keep the selection on a row that can actually be pressed.
   ///
-  /// A merged search now leads with a service heading, so leaving the selection
-  /// at zero would put it on a row that does nothing when pressed.
+  /// The rule - "zero, unless this list happens to start with a heading" - is a
+  /// fact about `pickerRows`, not about whoever rebuilt it, and it was being
+  /// restated at four of the ten sites that reset the selection. Here it is
+  /// stated once and every caller goes back to plain `selectedIndex = 0`. No
+  /// binding loop: `pickerRows` does not read `selectedIndex`.
+  onPickerRowsChanged: {
+    var items = root.pickerRows
+    if (root.selectedIndex >= items.length || !root.rowActionable(items[root.selectedIndex]))
+      root.selectedIndex = root.firstActionable()
+  }
+
+  /// The first row worth selecting, for when a list has just been rebuilt.
   function firstActionable() {
     var items = root.pickerRows
     for (var i = 0; i < items.length; i++)
@@ -367,7 +371,6 @@ BarWidget {
   /// standard category asks for the shelves the top-level sample could not show.
   function openServiceResults(service) {
     if (!service || serviceResultsProc.running) return
-    root.serviceResultsPending = String(service)
     root.serviceResultsFor = String(service)
     root.serviceResults = []
     root.serviceResultsStatus = root.strings.searching
@@ -381,11 +384,10 @@ BarWidget {
   }
 
   function closeServiceResults() {
+    root.selectedIndex = 0
     root.serviceResultsFor = ""
     root.serviceResults = []
     root.serviceResultsStatus = ""
-    // Not zero: the merged list it returns to leads with a service heading.
-    root.selectedIndex = root.firstActionable()
   }
 
   /// One service's rows under a heading per category.
@@ -417,8 +419,21 @@ BarWidget {
   /// a word of their own; anything else is shown as the service spelled it,
   /// rather than forced into a bucket it may not belong in.
   function categoryLabel(category) {
-    var key = "kind" + category.charAt(0).toUpperCase() + category.slice(1).toLowerCase()
-    return root.strings[key] || category
+    return root.kindLabel(category, category)
+  }
+
+  /// A `kind*` string by the name a service used, or `fallback` when nothing has
+  /// named it.
+  ///
+  /// One rule in one place, because there are two vocabularies under the same
+  /// `kind*` prefix and they only miss colliding because of a plural: item types
+  /// are singular and lower case (`kindTrack` -> "track"), category ids are
+  /// plural and Title Case (`kindTracks` -> "Songs"). Three sites built this key
+  /// by hand, which is three chances for those to drift into each other.
+  function kindLabel(raw, fallback) {
+    var word = String(raw)
+    var key = "kind" + word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()
+    return root.strings[key] || fallback
   }
 
   /// Hits as plain rows, which is what a single-service search wants.
@@ -486,6 +501,11 @@ BarWidget {
   /// has to say what it is about rather than leaving the rows beneath it to
   /// imply it.
   function noResultsLabel() {
+    // Inside one service's results the haystack is that service, whatever the
+    // merged setting says - "Nothing on any service" under a heading naming
+    // Deezer would be answering a question nobody asked.
+    if (root.serviceResultsFor !== "")
+      return root.strings.noResultsOn.arg(root.serviceResultsFor)
     if (!root.searchMerged) return root.strings.noResultsOn.arg(root.searchService)
     return root.strings.noResultsOn.arg(root.searchOnlyLinked
                                         ? root.strings.linkedServices
@@ -493,6 +513,10 @@ BarWidget {
   }
 
   function searchFailure() {
+    // As above: a merged search can blame nobody, but a drill-in knows exactly
+    // which service did not answer.
+    if (root.serviceResultsFor !== "")
+      return root.strings.searchError.arg(root.serviceResultsFor)
     return root.searchMerged
       ? root.strings.searchFailed
       : root.strings.searchError.arg(root.searchService)
@@ -716,31 +740,22 @@ BarWidget {
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
-        // Nothing at all is a failure and the exit code says so; `[]` is a real
-        // answer meaning the service has nothing. Reading the first as the
-        // second would replace an error with a wrong result.
-        if (!text || text.trim() === "") return
-        var parsed
-        try {
-          parsed = JSON.parse(text)
-        } catch (e) {
-          root.searchStatus = root.searchFailure()
-          return
-        }
-        var items = root.itemsIn(parsed)
+        var items = root.itemsFrom(text)
+        if (items === undefined) return
         if (items === null) {
           root.searchStatus = root.searchFailure()
           return
         }
+        // Before the rows change, not after: `onPickerRowsChanged` settles the
+        // selection onto something pressable, and a reset that lands after it
+        // simply undoes that - which put the cursor back on a service heading.
+        root.selectedIndex = 0
         root.searchResults = items
         // The reply answers what was asked, which may no longer be what is
         // typed. Binding to pendingTerm rather than to the field is what keeps
         // a slow answer from appearing under a query nobody made.
         root.searchedTerm = root.pendingTerm
         root.searchStatus = ""
-        // Not zero: a merged list leads with a service heading, and leaving the
-        // selection on it would make Enter do nothing.
-        root.selectedIndex = root.firstActionable()
       }
     }
   }
@@ -781,24 +796,20 @@ BarWidget {
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
-        if (!text || text.trim() === "") return
-        var parsed
-        try {
-          parsed = JSON.parse(text)
-        } catch (e) {
-          root.serviceResultsStatus = root.searchFailure()
-          return
-        }
-        var items = root.itemsIn(parsed)
+        var items = root.itemsFrom(text)
+        if (items === undefined) return
         if (items === null) {
           root.serviceResultsStatus = root.searchFailure()
           return
         }
-        if (root.serviceResultsFor !== root.serviceResultsPending
-            || root.serviceResultsFor === "") return
+        // The surface was left while this was in flight, so the answer belongs
+        // to nothing. One test rather than two: a second drill-in cannot start
+        // while this Process is running, so the only way the request and the
+        // open surface can disagree is if the surface closed.
+        if (root.serviceResultsFor === "") return
+        root.selectedIndex = 0
         root.serviceResults = items
         root.serviceResultsStatus = ""
-        root.selectedIndex = root.firstActionable()
       }
     }
   }
@@ -818,17 +829,9 @@ BarWidget {
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
-        // `[]` is an empty container, which is an answer; nothing at all is a
-        // failure and the exit code already said so.
-        if (!text || text.trim() === "") return
-        var parsed
-        try {
-          parsed = JSON.parse(text)
-        } catch (e) {
-          root.browseStatus = root.strings.browseError
-          return
-        }
-        var items = root.itemsIn(parsed)
+        // `[]` is an empty container, which is an answer.
+        var items = root.itemsFrom(text)
+        if (items === undefined) return
         if (items === null) {
           root.browseStatus = root.strings.browseError
           return
@@ -1149,11 +1152,31 @@ BarWidget {
   // always the one this widget shipped with - a half-finished upgrade, or a
   // build in ~/.local/bin older than the plugin - so both shapes are accepted
   // rather than letting an ordering accident empty the picker. Returns null
-  // for anything that is neither, which both callers treat as an error.
+  // for anything that is neither, which every caller treats as an error.
   function itemsIn(parsed) {
     if (Array.isArray(parsed)) return parsed
     if (parsed && Array.isArray(parsed.items)) return parsed.items
     return null
+  }
+
+  /// Rows out of one `--json` reply, or a word for what went wrong.
+  ///
+  /// Three `Process` handlers - search, browse, and one service's results - each
+  /// carried this line for line, differing only in which status property they
+  /// wrote. `undefined` means the command said nothing at all, which is a
+  /// failure the exit code has already reported; `null` means it said something
+  /// unreadable. `[]` is a real answer meaning the service has nothing, and
+  /// reading the first two as the third would replace an error with a wrong
+  /// result.
+  function itemsFrom(text) {
+    if (!text || text.trim() === "") return undefined
+    var parsed
+    try {
+      parsed = JSON.parse(text)
+    } catch (e) {
+      return null
+    }
+    return root.itemsIn(parsed)
   }
 
   function metaFlag(player, key) {
@@ -1945,23 +1968,17 @@ BarWidget {
   /// answer to what pressing it will do.
   function browseSubtitle(item) {
     var parts = []
-    if (item.type && !item.container) {
-      var raw = String(item.type)
-      var key = "kind" + raw.charAt(0).toUpperCase() + raw.slice(1).toLowerCase()
-      parts.push(root.strings[key] || raw.toLowerCase())
-    }
+    if (item.type && !item.container)
+      parts.push(root.kindLabel(item.type, String(item.type).toLowerCase()))
     if (item.description) parts.push(String(item.description))
     return parts.join(" · ")
   }
 
   function favoriteSubtitle(favorite) {
     var parts = []
-    if (favorite.type) {
-      var raw = String(favorite.type)
-      var key = "kind" + raw.charAt(0).toUpperCase() + raw.slice(1).toLowerCase()
-      // A kind nobody has named still reads as itself rather than vanishing.
-      parts.push(root.strings[key] || raw.toLowerCase())
-    }
+    // A kind nobody has named still reads as itself rather than vanishing.
+    if (favorite.type)
+      parts.push(root.kindLabel(favorite.type, String(favorite.type).toLowerCase()))
     // The artist, where the hit has one. This is the line that tells four rows
     // reading "Moon River" apart, which a merged search makes the common case
     // rather than a curiosity: the same song title comes back from every
@@ -3281,7 +3298,9 @@ BarWidget {
         // both ends readable, which is what matters when the two are "Media
         // Room" and a long station name.
         text: root.browsing ? root.pickingFor + "  ·  " + root.browseFrame.title
-                            : root.pickingFor
+                            : root.serviceResultsFor !== ""
+                              ? root.pickingFor + "  ·  " + root.serviceResultsFor
+                              : root.pickingFor
         color: root.bar.foreground
         font.family: root.bar.fontFamily
         font.pixelSize: Style.font.body
@@ -3338,11 +3357,10 @@ BarWidget {
         font.family: root.bar.fontFamily
 
         onTextChanged: {
+          // The old position means nothing once the list is a different list,
+          // and this goes first so `onPickerRowsChanged` can settle it.
+          root.selectedIndex = 0
           root.filterText = text
-          // The old position means nothing once the list is a different list.
-          // Not zero, though: backspacing to a term already searched brings the
-          // grouped rows straight back, and those lead with a service heading.
-          root.selectedIndex = root.firstActionable()
           // A stale "could not reach" under a query nobody has run yet reads as
           // if the new text had already failed.
           if (root.searchStatus !== "" && !searchProc.running) root.searchStatus = ""
