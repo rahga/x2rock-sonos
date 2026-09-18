@@ -427,8 +427,13 @@ BarWidget {
     root.pendingDepth = depth
     root.pendingAll = forCategory ? String(forCategory) : ""
     root.serviceResultsStatus = root.strings.searching
+    // `--all-categories`, not a list of the six standard names: a service may
+    // publish a shelf Sonos never standardised - Hype Machine searches blogs,
+    // Sveriges Radio searches radio shows - and those are named by the service,
+    // so nothing written here could ask for them. The CLI reads the
+    // presentation map; it is the side that knows.
     serviceResultsProc.command = [root.command, "search", "-s", String(service),
-                                  "-c", root.searchAllCategories,
+                                  "--all-categories",
                                   "--per-service", "0",
                                   "--count", String(depth),
                                   "--json", root.searchedTerm]
@@ -2498,10 +2503,6 @@ BarWidget {
   readonly property int searchCategoryAll: Math.max(1, Number(setting("searchCategoryAll", 100)) || 100)
 
   readonly property int searchPerService: Math.max(1, Number(setting("searchPerService", 3)) || 3)
-  // Every standard Sonos category name, sent on the drill-in. The CLI skips the
-  // ones a service does not have, so naming them all is how "everything this
-  // service found" is asked for without the widget knowing what it publishes.
-  readonly property string searchAllCategories: "tracks,artists,albums,playlists,stations,podcasts"
 
   // Which services the picker offers to walk. A service's own containers - a
   // personal library, a "For You", a genre tree - are the half of a linked
