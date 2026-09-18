@@ -112,7 +112,7 @@ which is an ordinary Unicode character. Override any subset:
 | `normalize` | `󰓦` | Grouping panel, opposite "Playing together" — sets every member to the group's level. Shown only while the members' levels differ |
 | `tv` | `󰠹` | Switches a soundbar to its TV input, and stands in for cover art while it is on TV |
 | `queue` | `󰲹` | Opens that room's queue |
-| `radio` | `󰐻` | Before the name, when the room is playing a live stream. Hovering it names the station |
+| `radio` | `󰐻` | Before the name, when the room is playing a live stream. Hovering it names the station. In the picker it also marks a row the service types `stream` or `program` — a station, a Radio Paradise channel, an artist station, a saved "Favorites Radio": continuous, with nothing to seek |
 | `stop` | `󰓛` | Stands in for `pause` on a source that refuses to be paused, such as a live stream |
 | `podcast` | `󰍬` | Before the name of a podcast show in the picker. A microphone, not the podcast icon proper, which reads too much like `radio` beside it |
 | `audiobook` | `󰗚` | Before the name of an audiobook. An open book rather than headphones: the marks say what a row is, not what plays it |

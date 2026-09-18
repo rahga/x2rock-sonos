@@ -1611,6 +1611,15 @@ BarWidget {
   /// a playing Audible track, both verified 2026-09-01, so that one matches on
   /// a substring where the others match whole.
   ///
+  /// `program` takes the antenna too, added 2026-09-18 after a favorite saved
+  /// from the Sonos app - one person's iHeartRadio "Favorites Radio", a
+  /// `custom_radio.favorites-…` - listed as a `PROGRAM` and drew no mark. It is
+  /// a station in every way that matters: continuous, no end, nothing to seek.
+  /// Radio Paradise's channels and iHeartRadio's artist stations carry the same
+  /// type, so all three now read alike. The *word* on the row stays `program`,
+  /// which is the service's own vocabulary and overridable as `kindProgram`;
+  /// the glyph is what says "this does not end".
+  ///
   /// A podcast *show* is `show`, and gets the microphone. Its episodes are
   /// typed `track` - identical to a song, with nothing on the row telling them
   /// apart - so the show is the only honest place to mark. It is also the row
@@ -1622,7 +1631,7 @@ BarWidget {
   /// rather than a guessed one.
   function markFor(item) {
     var kind = String((item && item.type) || "").toLowerCase()
-    if (kind === "stream" || kind.indexOf("audiobroadcast") !== -1)
+    if (kind === "stream" || kind === "program" || kind.indexOf("audiobroadcast") !== -1)
       return root.glyphs.radio
     if (kind === "show")
       return root.glyphs.podcast
