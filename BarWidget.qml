@@ -285,10 +285,37 @@ BarWidget {
     } else {
       rows.push({
         kind: "search",
-        item: { name: strings.searchFor.arg(searchService), type: "", art_url: "" }
+        item: { name: searchLabel(), type: "", art_url: "" }
       })
     }
     return rows
+  }
+
+  /// Which service a row belongs to, or "" when nothing can say.
+  ///
+  /// The item's own service first: a browse row, and every hit of a merged
+  /// search, comes from a named service that may not be the configured one, and
+  /// playing it as though it were would hand one service's id to another.
+  /// `searchService` is the fallback only when it names a real service - under
+  /// "all" or "linked" it names a *mode*, and `play-item -s all` would be a
+  /// confusing way to fail.
+  function serviceOf(item) {
+    var own = item && item.service ? String(item.service) : ""
+    if (own !== "") return own
+    return root.searchMerged ? "" : root.searchService
+  }
+
+  /// What the search row says, and what a failure says. A merged search names
+  /// no single service, so neither sentence can use `%1`.
+  function searchLabel() {
+    if (!root.searchMerged) return root.strings.searchFor.arg(root.searchService)
+    return root.searchOnlyLinked ? root.strings.searchLinked : root.strings.searchEverywhere
+  }
+
+  function searchFailure() {
+    return root.searchMerged
+      ? root.strings.searchFailed
+      : root.strings.searchError.arg(root.searchService)
   }
 
   /// A frame's identity, for telling "the reply I am waiting for" from "a reply
@@ -496,7 +523,7 @@ BarWidget {
       if (code !== 0) {
         // Blunt from the CLI, gentle here: the results already on screen stay,
         // and the failure is one line rather than an empty list.
-        root.searchStatus = root.strings.searchError.arg(root.searchService)
+        root.searchStatus = root.searchFailure()
         root.pendingTerm = ""
       }
     }
@@ -511,12 +538,12 @@ BarWidget {
         try {
           parsed = JSON.parse(text)
         } catch (e) {
-          root.searchStatus = root.strings.searchError.arg(root.searchService)
+          root.searchStatus = root.searchFailure()
           return
         }
         var items = root.itemsIn(parsed)
         if (items === null) {
-          root.searchStatus = root.strings.searchError.arg(root.searchService)
+          root.searchStatus = root.searchFailure()
           return
         }
         root.searchResults = items
@@ -535,8 +562,12 @@ BarWidget {
     if (term === "" || !root.searchEnabled || searchProc.running) return
     root.pendingTerm = term
     root.searchStatus = root.strings.searching
-    var command = [root.command, "search", "-s", root.searchService,
-                   "--json", "--count", String(root.searchCount)]
+    // No `-s` at all is what makes the CLI fan out; naming a service is what
+    // makes it ask one. The two are the same command either way.
+    var command = [root.command, "search", "--json",
+                   "--count", String(root.searchCount)]
+    if (!root.searchMerged) command.push("-s", root.searchService)
+    else if (root.searchOnlyLinked) command.push("--only-linked")
     // Without this the CLI searches the service's default category, which for
     // a service with no "all" is whatever its presentation map lists first -
     // Plex leads with artists, and a song title searched there finds nothing.
@@ -672,7 +703,8 @@ BarWidget {
   /// dismissed itself would make worse than pressing play once.
   function queueSearchResult(room, item) {
     if (!item || queueItemProc.running || !root.canQueue(item)) return
-    var service = String(item.service || root.searchService)
+    var service = root.serviceOf(item)
+    if (service === "") return
     var command = [root.command, "queue-item", "-s", service,
                    String(item.id), "--title", String(item.name || ""),
                    "-r", room]
@@ -687,10 +719,8 @@ BarWidget {
   function playSearchResult(room, item) {
     if (!item || playFavoriteProc.running) return
     root.focusedName = room
-    // The item's own service, falling back to the configured one. A browse row
-    // can come from a service that is not `searchService`, and playing it as
-    // though it did would hand one service's id to another.
-    var service = String(item.service || root.searchService)
+    var service = root.serviceOf(item)
+    if (service === "") return
     // The row's kind decides how it plays: a live stream is streamed, and
     // anything on-demand has to go in the queue, because the player is the only
     // thing that can resolve a service's protected media. Passing it saves the
@@ -1846,6 +1876,10 @@ BarWidget {
     // Searching a music service. %1 is the service's name, so a household that
     // points `searchService` somewhere else gets sentences that still read.
     "searchFor": "Search %1",
+    // The merged search, where naming one service would be a lie. Two wordings
+    // because "everywhere" and "the linked ones" are different promises.
+    "searchEverywhere": "Search all services",
+    "searchLinked": "Search linked services",
     "searching": "Searching…",
     // The + button'''s tooltip. A verb, because the glyph alone does not say
     // whether it adds here or plays next.
@@ -1853,6 +1887,9 @@ BarWidget {
     // A queue row the player holds no metadata for. Says whose silence it is.
     "untitledTrack": "(no title from the player)",
     "searchError": "Could not reach %1",
+    // A merged search names no one service, so it cannot blame one either: the
+    // CLI reports the services that timed out on stderr, which is not read here.
+    "searchFailed": "Search failed",
     "noResults": "Nothing found",
     // Walking a service's own containers. %1 is a service name in `browseIn`
     // and the place one level up in `up` - the parent container's name, or the
@@ -1958,9 +1995,23 @@ BarWidget {
   // services with anonymous access can be searched at all - the CLI says so
   // plainly if this names one that cannot. Set it to "" to leave the picker
   // exactly as it was, with no network call behind it.
+  //
+  // Two names mean "more than one", the same way `browseServices` takes "all":
+  // **"all"** asks every service that can answer, at once, and **"linked"** asks
+  // only those with an account. A merged reply carries each hit's own service,
+  // which is what `playSearchResult` already reads, so a row plays from wherever
+  // it came from.
   readonly property string searchService: String(setting("searchService", "TuneIn") || "")
+  readonly property bool searchMerged: searchService === "all" || searchService === "linked"
+  readonly property bool searchOnlyLinked: searchService === "linked"
   readonly property bool searchEnabled: searchService !== ""
-  readonly property int searchCount: Math.max(1, Number(setting("searchCount", 20)) || 20)
+  // Per service, not in total. Twenty is right for one service and wrong for
+  // thirty-five, which is why the CLI defaults differently for each; the widget
+  // has to pick a number explicitly, so it makes the same distinction.
+  readonly property int searchCount: {
+    var fallback = searchMerged ? 5 : 20
+    return Math.max(1, Number(setting("searchCount", fallback)) || fallback)
+  }
   // Which of the service's categories the search row queries, passed to the
   // CLI as `-c`. Empty means the CLI's default (the service's "all" when it
   // has one, else its first category). Worth setting for a library-shaped
@@ -1995,7 +2046,10 @@ BarWidget {
         if (typeof given[i] === "string" && given[i] !== "") names.push(given[i])
       return names
     }
-    var out = root.searchService !== "" ? [root.searchService] : []
+    // Seeded with the searched service, but only when that names one: under
+    // "all" or "linked" it names a mode, and a browse row called "all" would
+    // ask the CLI to open a service that does not exist.
+    var out = (root.searchService !== "" && !root.searchMerged) ? [root.searchService] : []
     for (var j = 0; j < root.linkedServices.length; j++) {
       var linked = root.linkedServices[j]
       var seen = false
