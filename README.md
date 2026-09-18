@@ -156,11 +156,15 @@ Anything the bar's font can draw works, including plain text — `"music":
 | `loading` | `Loading…` |
 | `filterHint` | `Type to filter` — the picker's filter placeholder. Filters favorites and kept items, and whatever container is open |
 | `noMatch` | `No match` |
-| `searchFor` | `Search %1` — the row that runs a query. `%1` is the service |
+| `searchFor` | `Search %1` — the row that runs a query against one service. `%1` is the service |
+| `searchEverywhere` / `searchLinked` | `Search all services` / `Search linked services` — the same row when `searchService` is `"all"` or `"linked"`, where no single service can be named |
 | `searching` / `searchError` | `Searching…` / `Could not reach %1` |
+| `searchFailed` | `Search failed` — in place of `searchError` for a merged search, which cannot blame one service |
 | `addToQueue` | `Add to queue` — the `+` button's tooltip |
 | `untitledTrack` | `(no title from the player)` — a queue row the player holds no metadata for |
-| `noResults` | `Nothing found` |
+| `noResultsOn` | `Nothing on %1` — the row shown when a search finds nothing. `%1` is the service, or `everywhere` / `linkedServices` below. It names its haystack because it sits *above* any favorites and bookmarks that did match, where a bare "nothing" would look like a verdict on them |
+| `everywhere` / `linkedServices` | `any service` / `the linked services` — what `noResultsOn` puts in `%1` for a merged search |
+| `noResults` | `Nothing found` — no longer used; kept so an existing override does not change anything. Override `noResultsOn` instead |
 | `browseIn` | `Browse %1` — the row that opens a service's own containers. `%1` is the service |
 | `up` | `← %1` — the row back out of a container. `%1` is where it goes: the parent's name, or the service's own at the top of the tree |
 | `browseLoading` / `browseError` | `Opening…` / `Could not open that` |

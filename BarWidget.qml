@@ -323,10 +323,10 @@ BarWidget {
   /// has to say what it is about rather than leaving the rows beneath it to
   /// imply it.
   function noResultsLabel() {
-    if (!root.searchMerged) return root.strings.noResults.arg(root.searchService)
-    return root.strings.noResults.arg(root.searchOnlyLinked
-                                      ? root.strings.linkedServices
-                                      : root.strings.everywhere)
+    if (!root.searchMerged) return root.strings.noResultsOn.arg(root.searchService)
+    return root.strings.noResultsOn.arg(root.searchOnlyLinked
+                                        ? root.strings.linkedServices
+                                        : root.strings.everywhere)
   }
 
   function searchFailure() {
@@ -1750,8 +1750,16 @@ BarWidget {
     // The artist, where the hit has one. This is the line that tells four rows
     // reading "Moon River" apart, which a merged search makes the common case
     // rather than a curiosity: the same song title comes back from every
-    // service at once. Favorites rarely carry one, and nothing is shown then.
-    if (favorite.description) parts.push(String(favorite.description))
+    // service at once.
+    //
+    // Capped, because this is not always an artist. A service puts whatever it
+    // likes here - a station's whole blurb, a Norwegian programme synopsis -
+    // and the subtitle is one elided line, so an uncapped one pushes the service
+    // name off the end of it. The brand is the part that cannot be guessed back.
+    if (favorite.description) {
+      var by = String(favorite.description)
+      parts.push(by.length > 40 ? by.slice(0, 39) + "…" : by)
+    }
     // Service names are brands; they stay as the service spells them.
     if (favorite.service) parts.push(favorite.service)
     return parts.join(" · ")
@@ -1916,7 +1924,14 @@ BarWidget {
     // bookmarks that may well have matched: a bare "Nothing found" at the top of
     // a list with a playable row under it is simply wrong. %1 is the service, or
     // the words for the merged tiers.
-    "noResults": "Nothing on %1",
+    //
+    // A **new key** rather than a new meaning for `noResults`. Strings merge
+    // from shell.json per key, so redefining that one would leave every
+    // household that had overridden it - as the README invites - with its old
+    // complete sentence at the top of the list, which is the exact row this
+    // replaced. `noResults` stays for anyone still using it.
+    "noResults": "Nothing found",
+    "noResultsOn": "Nothing on %1",
     "everywhere": "any service",
     "linkedServices": "the linked services",
     // Walking a service's own containers. %1 is a service name in `browseIn`
