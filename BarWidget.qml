@@ -367,11 +367,6 @@ BarWidget {
     return rows
   }
 
-  /// Whether a row can be pressed. Headings and notes are read, not chosen.
-  ///
-  /// The list holds them inline rather than in a separate section, which is what
-  /// lets one keyboard path walk the whole thing - but only if the arrows step
-  /// over them, which is what [`stepSelection`](stepSelection) is for.
   /// A row that is scaffolding rather than a thing: a heading, a way in, a way
   /// back. They carry no art and no second line, whether or not they can be
   /// pressed.
@@ -382,6 +377,11 @@ BarWidget {
            || kind === "linkService" || kind === "note"
   }
 
+  /// Whether a row can be pressed. Headings and notes are read, not chosen.
+  ///
+  /// The list holds them inline rather than in a separate section, which is what
+  /// lets one keyboard path walk the whole thing - but only if the arrows step
+  /// over them, which is what [`stepSelection`](stepSelection) is for.
   function rowActionable(row) {
     if (!row || row.kind === "note") return false
     // A service heading always opens that service. A category heading is only a
@@ -727,13 +727,11 @@ BarWidget {
 
   function openPicker(room) {
     root.focusedName = room
-    root.filterText = ""
-    root.selectedIndex = 0
     root.clearSearch()
-    filterField.text = ""
     root.pickingFor = room
     // One surface at a time; the rooms popup is where this was chosen from.
     root.popupOpen = false
+    // Also the cursor and the filter, through resetBrowseView.
     root.clearBrowse()
     root.loadFavorites()
     root.loadBookmarks()
@@ -1062,14 +1060,23 @@ BarWidget {
     var stack = root.browseStack.slice()
     stack.push({ service: service, id: id, title: String(title || id) })
     root.browseStack = stack
+    root.resetBrowseView()
+    root.fetchBrowse()
+  }
+
+  /// Everything a frame change leaves behind: the rows and the reply they came
+  /// from, any status, the cursor, and the filter. The filter belonged to the
+  /// list being left, and carrying it into a new container would hide most of
+  /// it for a reason nobody could see. Every push, pop and open of the picker
+  /// did this by hand; the stack itself is the one thing they each do
+  /// differently, so it stays with the caller.
+  function resetBrowseView() {
     root.browseItems = []
     root.browseAnsweredFor = ""
+    root.browseStatus = ""
     root.selectedIndex = 0
-    // The filter belonged to the list being left. Carrying it into a new
-    // container would hide most of it for a reason nobody could see.
     root.filterText = ""
     filterField.text = ""
-    root.fetchBrowse()
   }
 
   /// Open the services index. A push like `browseInto`, minus the fetch: the
@@ -1078,12 +1085,7 @@ BarWidget {
     var stack = root.browseStack.slice()
     stack.push({ service: "", id: root.servicesFrameId, title: root.strings.services })
     root.browseStack = stack
-    root.browseItems = []
-    root.browseAnsweredFor = ""
-    root.browseStatus = ""
-    root.selectedIndex = 0
-    root.filterText = ""
-    filterField.text = ""
+    root.resetBrowseView()
   }
 
   /// Back one level, and out to favorites from the top.
@@ -1091,12 +1093,7 @@ BarWidget {
     var stack = root.browseStack.slice()
     stack.pop()
     root.browseStack = stack
-    root.browseItems = []
-    root.browseAnsweredFor = ""
-    root.browseStatus = ""
-    root.selectedIndex = 0
-    root.filterText = ""
-    filterField.text = ""
+    root.resetBrowseView()
     if (stack.length > 0) root.fetchBrowse()
   }
 
@@ -1112,9 +1109,7 @@ BarWidget {
 
   function clearBrowse() {
     root.browseStack = []
-    root.browseItems = []
-    root.browseStatus = ""
-    root.browseAnsweredFor = ""
+    root.resetBrowseView()
   }
 
   /// Whether a row can be added to a queue, which the CLI decides rather than
@@ -1155,7 +1150,7 @@ BarWidget {
   // re-running the search to find it again would cost a second round trip and
   // could land on a different hit if the service reordered.
   function playSearchResult(room, item) {
-    if (!item || playFavoriteProc.running) return
+    if (!item || playProc.running) return
     root.focusedName = room
     var service = root.serviceOf(item)
     if (service === "") return
@@ -1167,8 +1162,8 @@ BarWidget {
                    String(item.id), "--title", String(item.name || ""),
                    "-r", room]
     if (item.type) command.push("--kind", String(item.type))
-    playFavoriteProc.command = command
-    playFavoriteProc.running = true
+    playProc.command = command
+    playProc.running = true
     root.closePicker()
     root.backToRooms()
   }
@@ -1201,6 +1196,32 @@ BarWidget {
     bookmarksProc.running = true
   }
 
+  /// Service names out of one `--json` array, deduplicated and sorted by name,
+  /// or `null` for a reply that is not one - empty, unreadable, or not an array.
+  ///
+  /// `pick` turns one entry into its name, or `""` to leave it out. Three
+  /// `Process` handlers - accounts, linkable, household - each carried this
+  /// body, and each caller's `null` branch is the same: keep what was already
+  /// known. By name because the CLI's order is by service id, and "181 before
+  /// 254" means nothing to someone reading a list of rows.
+  function sortedNames(text, pick) {
+    if (!text || text.trim() === "") return null
+    var parsed
+    try {
+      parsed = JSON.parse(text)
+    } catch (e) {
+      return null
+    }
+    if (!Array.isArray(parsed)) return null
+    var names = []
+    for (var i = 0; i < parsed.length; i++) {
+      var name = pick(parsed[i])
+      if (name !== "" && names.indexOf(name) === -1) names.push(name)
+    }
+    names.sort(function(a, b) { return a.localeCompare(b) })
+    return names
+  }
+
   // `x2rock link` is already the act of configuration - a deliberate statement
   // that this household uses that service from this machine - so the picker
   // reads what it left behind rather than asking for the same names to be
@@ -1212,24 +1233,11 @@ BarWidget {
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
-        if (!text || text.trim() === "") return
-        try {
-          var parsed = JSON.parse(text)
-          if (!Array.isArray(parsed)) return
-          var names = []
-          for (var i = 0; i < parsed.length; i++) {
-            var name = String((parsed[i] && parsed[i].service) || "")
-            if (name !== "" && names.indexOf(name) === -1) names.push(name)
-          }
-          // By name. The CLI's order is by service id, and "181 before 254"
-          // means nothing to someone reading a list of rows.
-          names.sort(function(a, b) {
-            return a.toLowerCase() < b.toLowerCase() ? -1 : 1
-          })
-          root.linkedServices = names
-        } catch (e) {
-          // Leave whatever was already known; see the favorites picker.
-        }
+        var names = root.sortedNames(text, function(entry) {
+          return String((entry && entry.service) || "")
+        })
+        // Leave whatever was already known; see the favorites picker.
+        if (names !== null) root.linkedServices = names
       }
     }
   }
@@ -1239,13 +1247,6 @@ BarWidget {
     accountsProc.running = true
   }
 
-  // The household's own catalogue, for `"browseServices": "all"`. Reads the
-  // cached list the CLI keeps, so it costs no round trip until something is
-  // actually chosen - the same rule the rest of this picker follows. Failure is
-  // silent, like the accounts read: the fallback is the list already in hand.
-  // What could be linked and is not, for the one list that shows such a thing.
-  // Silent on failure like its neighbour: the fallback is an index with no link
-  // rows in it, which is exactly what this widget did before.
   // The link itself. Long-running by nature - it waits for someone to finish in
   // a browser - so nothing here waits on it; the lists are re-read when it ends.
   Process {
@@ -1256,53 +1257,37 @@ BarWidget {
     }
   }
 
+  // What could be linked and is not, for the one list that shows such a thing.
+  // Silent on failure like its neighbour: the fallback is an index with no link
+  // rows in it, which is exactly what this widget did before.
   Process {
     id: linkableProc
     command: [root.command, "link", "--json"]
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
-        if (!text || text.trim() === "") return
-        try {
-          var parsed = JSON.parse(text)
-          if (!Array.isArray(parsed)) return
-          var names = []
-          for (var i = 0; i < parsed.length; i++)
-            if (parsed[i] && !parsed[i].linked && parsed[i].name)
-              names.push(String(parsed[i].name))
-          names.sort(function(a, b) {
-            return a.toLowerCase() < b.toLowerCase() ? -1 : 1
-          })
-          root.linkableServices = names
-        } catch (e) {
-          // Leave whatever was already known.
-        }
+        var names = root.sortedNames(text, function(entry) {
+          return (entry && !entry.linked && entry.name) ? String(entry.name) : ""
+        })
+        // Leave whatever was already known.
+        if (names !== null) root.linkableServices = names
       }
     }
   }
 
+  // The household's own catalogue, for `"browseServices": "all"`. Reads the
+  // cached list the CLI keeps, so it costs no round trip until something is
+  // actually chosen - the same rule the rest of this picker follows. Failure is
+  // silent, like the accounts read: the fallback is the list already in hand.
   Process {
     id: servicesProc
     command: [root.command, "browse", "--json"]
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
-        if (!text || text.trim() === "") return
-        try {
-          var parsed = JSON.parse(text)
-          if (!Array.isArray(parsed)) return
-          var names = []
-          for (var i = 0; i < parsed.length; i++) {
-            var name = String(parsed[i] || "")
-            if (name !== "" && names.indexOf(name) === -1) names.push(name)
-          }
-          names.sort(function(a, b) {
-            return a.toLowerCase() < b.toLowerCase() ? -1 : 1
-          })
-          root.householdServices = names
-        } catch (e) {
-          // Leave whatever was already known; see the favorites picker.
-        }
+        var names = root.sortedNames(text, function(entry) { return String(entry || "") })
+        // Leave whatever was already known; see the favorites picker.
+        if (names !== null) root.householdServices = names
       }
     }
   }
@@ -1335,15 +1320,15 @@ BarWidget {
   // By name, which is what `bookmark` matches on, and which is unique enough:
   // keeping the same object twice replaces rather than duplicates.
   function playBookmark(room, item) {
-    if (!item || playFavoriteProc.running) return
+    if (!item || playProc.running) return
     root.focusedName = room
-    playFavoriteProc.command = [root.command, "bookmark", String(item.name || ""), "-r", room]
-    playFavoriteProc.running = true
+    playProc.command = [root.command, "bookmark", String(item.name || ""), "-r", room]
+    playProc.running = true
     root.closePicker()
     root.backToRooms()
   }
 
-  Process { id: playFavoriteProc }
+  Process { id: playProc }
 
   // Re-read on every open. Favorites change rarely, but they do change - and
   // whoever added one in the Sonos app should not have to restart the shell to
@@ -1359,10 +1344,10 @@ BarWidget {
   // full-width brackets. Passed as arguments rather than a command line, so
   // nothing needs quoting.
   function playFavorite(room, favorite) {
-    if (!favorite || playFavoriteProc.running) return
+    if (!favorite || playProc.running) return
     root.focusedName = room
-    playFavoriteProc.command = [root.command, "favorite", String(favorite.id), "-r", room]
-    playFavoriteProc.running = true
+    playProc.command = [root.command, "favorite", String(favorite.id), "-r", room]
+    playProc.running = true
     root.closePicker()
     root.backToRooms()
   }
@@ -1376,18 +1361,12 @@ BarWidget {
     root.popupOpen = true
   }
 
-  // The daemon publishes each group's rooms as x2rock:members, because MPRIS
-  // describes one player and cannot say that player is really several speakers.
   /// What a soundbar is receiving, empty unless it is on its TV input.
   function inputFormatOf(player) {
     var md = player && player.metadata ? player.metadata["x2rock:inputFormat"] : null
     return md ? String(md) : ""
   }
 
-  /// Whether the room is on its TV input; the format can be empty there too.
-  /// One of the daemon's namespaced boolean keys. `=== true` rather than a
-  /// truthy test on purpose: an absent key is "nothing to say about this
-  /// room", not "false", and the two differ for the soundbar settings.
   // `browse --json` and `search --json` answer `{total, index, items}`. They
   // answered a bare array before paging existed, and the binary on PATH is not
   // always the one this widget shipped with - a half-finished upgrade, or a
@@ -1421,10 +1400,14 @@ BarWidget {
     return root.itemsIn(parsed)
   }
 
+  /// One of the daemon's namespaced boolean keys. `=== true` rather than a
+  /// truthy test on purpose: an absent key is "nothing to say about this
+  /// room", not "false", and the two differ for the soundbar settings.
   function metaFlag(player, key) {
     return !!(player && player.metadata && player.metadata[key] === true)
   }
 
+  /// Whether the room is on its TV input; the format can be empty there too.
   function onTvInput(player) {
     return root.metaFlag(player, "x2rock:onTvInput")
   }
@@ -1475,10 +1458,6 @@ BarWidget {
     return root.metaFlag(player, "x2rock:hasTvInput")
   }
 
-  /// Whether what is playing is a live stream - internet radio, and anything
-  /// else the player resolves continuously rather than as an item. Strictly
-  /// `=== true`, like the other flags: an older daemon sends no such key, and
-  /// undefined must read as "no" rather than mark every room a station.
   // Whether the thumbs mean anything on this row. The daemon publishes whether
   // the current item carries a real service track id - the CLI's own first
   // gate for `rate`, and the one thing about rateability that is knowable on
@@ -1490,6 +1469,10 @@ BarWidget {
     return root.transportAvailable(player) && root.metaFlag(player, "x2rock:hasTrackId")
   }
 
+  /// Whether what is playing is a live stream - internet radio, and anything
+  /// else the player resolves continuously rather than as an item. Strictly
+  /// `=== true`, like the other flags: an older daemon sends no such key, and
+  /// undefined must read as "no" rather than mark every room a station.
   function isLiveStream(player) {
     return root.metaFlag(player, "x2rock:isLiveStream")
   }
@@ -1678,6 +1661,8 @@ BarWidget {
     rateProc.running = true
   }
 
+  // The daemon publishes each group's rooms as x2rock:members, because MPRIS
+  // describes one player and cannot say that player is really several speakers.
   function membersOf(player) {
     var members = player && player.metadata ? player.metadata["x2rock:members"] : null
     return (members && members.length) ? members : []
@@ -2572,9 +2557,6 @@ BarWidget {
   // has one, else its first category). Worth setting for a library-shaped
   // service: "tracks" is what a song title typed into a picker means on Plex.
   readonly property string searchCategory: String(setting("searchCategory", "") || "")
-  // Rows beneath one service's heading, before "more from" offers the rest.
-  // Three is what Sonos's own mobile app shows, and about as many as anyone
-  // reads per service when twenty of them answered.
   // How long typing must stop before a merged search runs itself, in
   // milliseconds. Long enough that a word typed at speed is one request, short
   // enough not to feel like waiting. 0 turns it off and leaves the search row as
@@ -2595,6 +2577,9 @@ BarWidget {
   // searching again.
   readonly property int searchCategoryAll: Math.max(1, Number(setting("searchCategoryAll", 100)) || 100)
 
+  // Rows beneath one service's heading, before **More** offers the rest.
+  // Three is what Sonos's own mobile app shows, and about as many as anyone
+  // reads per service when twenty of them answered.
   readonly property int searchPerService: Math.max(1, Number(setting("searchPerService", 3)) || 3)
 
   // Which services the picker offers to walk. A service's own containers - a
@@ -2611,20 +2596,17 @@ BarWidget {
   // `"all"`: every service the household can reach rather than the discovered
   // few. Its own property because two places ask - the list below, and the
   // picker, which only pays for the read when the answer is wanted.
-  readonly property bool browseAllServices: {
-    var given = setting("browseServices", null)
-    return typeof given === "string" && given.toLowerCase() === "all"
-  }
+  readonly property var browseServicesSetting: setting("browseServices", null)
+  readonly property bool browseAllServices: typeof browseServicesSetting === "string"
+                                            && browseServicesSetting.toLowerCase() === "all"
   // `browseServices: []` is browsing turned off by hand - the third named mode
   // of that setting, beside "all" and a list - and the Services door goes with it.
-  readonly property bool browsingOff: {
-    var given = setting("browseServices", null)
-    return Array.isArray(given) && given.length === 0
-  }
+  readonly property bool browsingOff: Array.isArray(browseServicesSetting)
+                                      && browseServicesSetting.length === 0
 
   readonly property var browseServices: {
     if (root.browseAllServices) return root.householdServices
-    var given = setting("browseServices", null)
+    var given = root.browseServicesSetting
     if (Array.isArray(given)) {
       var names = []
       for (var i = 0; i < given.length; i++)
@@ -2873,7 +2855,7 @@ BarWidget {
       if (mouse.button === Qt.MiddleButton) {
         root.togglePlay(root.focused)
       } else {
-        root.popupOpen = !root.popupOpen
+        root.toggle()
       }
     }
 
@@ -3718,7 +3700,7 @@ BarWidget {
       }
 
       ListView {
-        id: favoritesList
+        id: pickerList
         anchors.top: filterField.bottom
         anchors.topMargin: Style.space(8)
         anchors.left: parent.left
@@ -3778,8 +3760,6 @@ BarWidget {
             size: Style.space(root.pickerArtSize)
             // The action rows and the empty-result note carry no art, and a
             // placeholder speaker beside them would read as a thing to play.
-            // A container often does have art - services give their own
-            // sections icons - so it keeps its tile.
             // A container often does have art - services give their own sections
             // icons - so it keeps its tile; scaffolding never does.
             visible: root.showArt && !root.structuralRow(entry.kind)
