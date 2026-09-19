@@ -1,8 +1,9 @@
 # x2rock for Sonos — Omarchy bar widget
 
-Sonos rooms in the bar: now-playing, transport, per-room volume, favorites,
-browsing and searching a music service, grouping, party mode, and rating a
-track up or down where the service offers it. Driven entirely by the `x2rock daemon`'s MPRIS players.
+Sonos rooms in the bar: now-playing, transport, per-room volume, a music picker
+(favorites, kept items, and every service the household can reach — browse one,
+or search them all at once), grouping, party mode, and rating a track up or down
+where the service offers it. Driven entirely by the `x2rock daemon`'s MPRIS players.
 
 Needs `x2rock` on `PATH` and `x2rock daemon` running. When no Sonos players are detected, the widget hides itself.
 
@@ -36,6 +37,24 @@ To remove the plugin completely:
 omarchy plugin remove x2rock.sonos
 ```
 
+## The picker
+
+Each room's music glyph opens the picker. Its rows, top to bottom:
+
+- **Services** — one door, always first (only `browseServices: []` removes it). Inside: an
+  explainer line, every service the picker can walk, then a **Link** row for each service the
+  household has that this machine holds no token for — in every mode, not only `"all"`.
+- **Search** — appears once you type, runs itself when typing pauses (`searchDelay`), and its
+  answers replace the row. With `searchService` set to `"linked"` or `"all"` it asks several
+  services at once and groups the hits by service, the way the mobile app does; a service heading
+  opens that service's whole answer by category. With one service named it searches that one.
+- **Favorites**, then **kept items**. Favorites the household can no longer play — the ones the
+  Sonos app greys out after their service was removed — are left out, since nothing here can act
+  on them.
+
+Typing filters favorites and kept items as well as searching, so a name you saved and a name a
+service knows both answer the same box.
+
 ## Configuring
 
 Everything below is set on this widget's entry in the `bar.layout` subtree of
@@ -54,7 +73,7 @@ the plugin is installed by copying over the previous copy, so changes to
   "panelWidth": 380,
   "highlight": 0.12,
   "command": "x2rock",
-  "searchService": "TuneIn",
+  "searchService": "linked",  // default "TuneIn" (one anonymous service); "all" asks every service
   "browseServices": ["iHeartRadio", "Bandcamp"],
   "glyphs": {
     "music": "󰝚"
