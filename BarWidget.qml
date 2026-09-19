@@ -1173,26 +1173,6 @@ BarWidget {
     root.backToRooms()
   }
 
-  // Only worth offering when there is a title to hang a name on. The CLI
-  // refuses a live stream with no id of its own, and a button that always looks
-  // available and sometimes silently does nothing is worse than a dim one.
-  function canKeep(player) {
-    return !!(player && player.trackTitle)
-  }
-
-  Process {
-    id: keepProc
-    // Re-read afterwards so a kept item shows in the picker immediately rather
-    // than at the next open.
-    onExited: root.loadBookmarks()
-  }
-
-  function keepPlaying(room) {
-    if (keepProc.running) return
-    keepProc.command = [root.command, "keep", "-r", room]
-    keepProc.running = true
-  }
-
   Process {
     id: bookmarksProc
     command: [root.command, "bookmarks", "--json"]
@@ -2304,7 +2284,7 @@ BarWidget {
     // nf-md-music (U+F075A): two beamed quavers, from the same Material Design
     // set as every other glyph here. Plain `♪` (U+266A) was tried first, to
     // avoid depending on a patched font - but the dependency was already there,
-    // since sixteen of the seventeen glyphs below are Nerd Font icons and the
+    // since all but two of the glyphs below are Nerd Font icons and the
     // widget draws boxes without one. Avoiding it for this one button bought
     // nothing and cost a per-character font fallback, because JetBrainsMono
     // Nerd Font has no U+266A: the note came from Adwaita or Liberation
@@ -2358,7 +2338,7 @@ BarWidget {
   })
 
   // Each key falls back on its own, so overriding one glyph does not mean
-  // restating the other eleven.
+  // restating the rest.
   readonly property var glyphs: {
     var merged = {}
     for (var name in defaultGlyphs) merged[name] = defaultGlyphs[name]
@@ -2466,10 +2446,8 @@ BarWidget {
     "noResultsOn": "Nothing on %1",
     "everywhere": "any service",
     "linkedServices": "the linked services",
-    // Walking a service's own containers. %1 is a service name in `browseIn`
-    // and the place one level up in `up` - the parent container's name, or the
-    // service's own at the top of the tree.
-    "browseIn": "Browse %1",
+    // Walking a service's own containers. %1 in `up` is the place one level up
+    // - the parent container's name, or the service's own at the top of the tree.
     // The row that opens the services index, which is also the index frame's
     // own name - so a service opened from it says "back to Services".
     "services": "Services",
@@ -2798,7 +2776,11 @@ BarWidget {
   /// either and the Control API refuses the write (`ERROR_NO_PERMISSION`) - it
   /// goes out over UPnP `SetEQ`, which is what the CLI already does.
   function toggleSoundbar(player, key, flag) {
-    if (!player) return
+    // Guarded like every other one-shot Process here, and before the overlay
+    // is written: a running Process ignores a new `command`, so a fast second
+    // press would show the toggle flipped while nothing was sent - the exact
+    // lie the overlay exists to prevent.
+    if (!player || soundbarProc.running) return
     var now = root.soundbarState(player, key)
     if (now === undefined) return
     root.focusedName = player.identity
@@ -3761,7 +3743,7 @@ BarWidget {
           readonly property var payload: entry.modelData.item
           readonly property string kind: entry.modelData.kind
           /// A note is a sentence, not a thing to play.
-          readonly property bool actionable: root.rowActionable(entry)
+          readonly property bool actionable: root.rowActionable(entry.modelData)
 
           width: ListView.view.width
           height: Math.max(entryText.implicitHeight, root.showArt ? entryArt.size : 0)

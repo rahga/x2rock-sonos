@@ -111,6 +111,8 @@ which is an ordinary Unicode character. Override any subset:
 | `ungroup` | `󰌸` | Sends one room back out on its own |
 | `normalize` | `󰓦` | Grouping panel, opposite "Playing together" — sets every member to the group's level. Shown only while the members' levels differ |
 | `tv` | `󰠹` | Switches a soundbar to its TV input, and stands in for cover art while it is on TV |
+| `nightSound` | `󰖔` | A soundbar's Night Sound toggle |
+| `speech` | `󰗋` | A soundbar's Speech Enhancement toggle |
 | `queue` | `󰲹` | Opens that room's queue |
 | `radio` | `󰐻` | Before the name, when the room is playing a live stream. Hovering it names the station. In the picker it also marks a row the service types `stream` or `program` — a station, a Radio Paradise channel, an artist station, a saved "Favorites Radio": continuous, with nothing to seek |
 | `stop` | `󰓛` | Stands in for `pause` on a source that refuses to be paused, such as a live stream |
@@ -131,7 +133,7 @@ Both come at a cost on a bar whose font *is* patched, which is why neither is
 the default. JetBrainsMono Nerd Font has neither codepoint, so each one is a
 per-character fallback to some other font at some other weight. 📻 is the
 louder of the two: `RADIO` is `Emoji_Presentation=Yes`, so fontconfig resolves
-it to Noto Color Emoji and it arrives in full colour beside seventeen
+it to Noto Color Emoji and it arrives in full colour beside the
 monochrome line icons — and, being colour, it ignores the row's foreground and
 stops dimming with its neighbours. Appending U+FE0E asks for text presentation
 instead, which helps only if a font on the box draws it that way.
@@ -166,6 +168,7 @@ Anything the bar's font can draw works, including plain text — `"music":
 | `searching` / `searchError` | `Searching…` / `Could not reach %1` |
 | `searchFailed` | `Search failed` — in place of `searchError` for a merged search, which cannot blame one service |
 | `addToQueue` | `Add to queue` — the `+` button's tooltip |
+| `tooltipNightSound` / `tooltipSpeech` | `Night Sound` / `Speech Enhancement` — tooltips on a soundbar's two toggles |
 | `untitledTrack` | `(no title from the player)` — a queue row the player holds no metadata for |
 | `link` | `Link` — on a service in the index that has no account on this machine. Deliberately not "register": linking stores *this machine's* token, which buys search and browse. What makes a service's tracks **queue** is the household holding its own account, added in the Sonos app, which nothing in the widget can do |
 | `more` / `showAll` | `More` / `Show all` — on the right of a heading, beside the chevron, saying what pressing it does. A service heading always says `More`; a category heading says `More` to reach its page, then `Show all` to reach the rest, then nothing |
@@ -173,12 +176,12 @@ Anything the bar's font can draw works, including plain text — `"music":
 | `noResultsOn` | `Nothing on %1` — the row shown when a search finds nothing. `%1` is the service, or `everywhere` / `linkedServices` below. It names its haystack because it sits *above* any favorites and bookmarks that did match, where a bare "nothing" would look like a verdict on them |
 | `everywhere` / `linkedServices` | `any service` / `the linked services` — what `noResultsOn` puts in `%1` for a merged search |
 | `noResults` | `Nothing found` — no longer used; kept so an existing override does not change anything. Override `noResultsOn` instead |
-| `browseIn` | `Browse %1` — the row that opens a service's own containers. `%1` is the service |
 | `up` | `← %1` — the row back out of a container. `%1` is where it goes: the parent's name, or the service's own at the top of the tree |
+| `pickerHome` | `Back` — what `up` names from the Services index: the favorites and kept items it opened over |
 | `browseLoading` / `browseError` | `Opening…` / `Could not open that` |
 | `browseEmpty` | `Nothing here` — a container the service says is empty |
 | `servicesHint` | `Open a service to browse it, or link one that has no account here` — the note at the top of the Services index, saying what the list is for |
-| `noFavorites` / `favoritesError` | `No favorites saved` / `Could not read favorites` |
+| `noFavorites` / `favoritesError` | `Nothing saved yet` / `Could not read favorites` |
 | `nothingQueued` / `queueError` | `Nothing queued` / `Could not read the queue` |
 | `playingTogether` | `Playing together` — heading over a group's members |
 | `playTogetherWith` / `addAnother` | `Play together with` / `Add another` — heading over the rooms that can join |
