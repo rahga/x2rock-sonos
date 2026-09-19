@@ -177,6 +177,7 @@ Anything the bar's font can draw works, including plain text — `"music":
 | `up` | `← %1` — the row back out of a container. `%1` is where it goes: the parent's name, or the service's own at the top of the tree |
 | `browseLoading` / `browseError` | `Opening…` / `Could not open that` |
 | `browseEmpty` | `Nothing here` — a container the service says is empty |
+| `servicesHint` | `Open a service to browse it, or link one that has no account here` — the note at the top of the Services index, saying what the list is for |
 | `noFavorites` / `favoritesError` | `No favorites saved` / `Could not read favorites` |
 | `nothingQueued` / `queueError` | `Nothing queued` / `Could not read the queue` |
 | `playingTogether` | `Playing together` — heading over a group's members |

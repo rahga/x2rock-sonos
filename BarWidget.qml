@@ -285,6 +285,9 @@ BarWidget {
       // The index answers itself, so the guard below - which waits for a reply
       // - would never let its rows through.
       if (root.browsingIndex) {
+        // What this list is, said once at the top.
+        out.push({ kind: "note",
+                   item: { name: strings.servicesHint, type: "", art_url: "" } })
         var svcs = root.shownServices
         for (var s = 0; s < svcs.length; s++)
           out.push({ kind: "browseService",
@@ -346,10 +349,11 @@ BarWidget {
 
     // One door rather than one row per service. A household can reach dozens -
     // 36 here - and a picker that lists a catalogue answers a different
-    // question from "what should this room play". First, above the saved items:
-    // it is one row and it never moves, so it is the one thing in this list
-    // whose position can be learned.
-    if (browseServices.length > 0 || root.linkableServices.length > 0)
+    // question from "what should this room play". Always present and first of
+    // the base list: a row whose position never moves is the one thing here
+    // that can be learned, and an empty index explains itself. Only
+    // `browseServices: []` removes it.
+    if (!root.browsingOff)
       rows.push({ kind: "servicesIndex",
                   item: { name: strings.services, type: "", art_url: "" } })
 
@@ -736,7 +740,14 @@ BarWidget {
     // Re-read on every open, like favorites: an account linked in a terminal
     // minutes ago should not need a shell restart to reach the picker.
     root.loadLinkedServices()
-    if (root.browseAllServices) root.loadHouseholdServices()
+    // The household's own list and what can be linked, likewise once per open
+    // and in every mode - not only under `browseServices: "all"`. The Services
+    // index is the one surface where a service with no token is visible, so
+    // without this "link what it cannot reach" is silently unavailable in the
+    // default and "linked" modes. These two do reach the LAN (a player and its
+    // service list), which is why they load here, once, and not each time the
+    // door is opened.
+    root.loadHouseholdServices()
   }
 
   function closePicker() {
@@ -885,7 +896,6 @@ BarWidget {
       waitForEnd: true
       onStreamFinished: {
         var items = root.itemsFrom(text)
-        if (items === undefined) return
         if (items === null) {
           root.searchStatus = root.searchFailure()
           return
@@ -963,9 +973,19 @@ BarWidget {
 
   // Its own Process, for the reason searchProc has one: this leaves the LAN, and
   // a service that hangs must not reach anything the daemon does.
+  //
+  // It is also the one process this file cancels (`fetchServiceResults`,
+  // `closeServiceResults`), and a cancelled run's exit and its stream both land
+  // *after* the replacement is armed or the surface is gone. So both handlers
+  // begin by asking whether the reply is still theirs: `running` is true only
+  // for a stale exit - a process reports its own with it false - and
+  // `serviceResultsFor` is empty once the drill-in has been left. Acting on a
+  // stale reply would clear the `pendingAll` the new fetch just set, so its
+  // category would never expand, or write a failure onto a closed surface.
   Process {
     id: serviceResultsProc
     onExited: function(code) {
+      if (serviceResultsProc.running || root.serviceResultsFor === "") return
       // The tier goes with it: a heading that could not be filled must still
       // offer to try, rather than sit there claiming to show everything.
       if (code !== 0) {
@@ -976,16 +996,13 @@ BarWidget {
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
+        if (serviceResultsProc.running || root.serviceResultsFor === "") return
         var items = root.itemsFrom(text)
-        if (items === undefined) return
         if (items === null) {
           root.serviceResultsStatus = root.searchFailure()
           root.pendingAll = ""
           return
         }
-        // The surface was left while this was in flight, so the answer belongs
-        // to nothing.
-        if (root.serviceResultsFor === "") return
         // Only now is the depth true of what is on screen, and only now has the
         // category that asked for everything actually got it.
         root.serviceResultsDepth = root.pendingDepth
@@ -1020,7 +1037,6 @@ BarWidget {
       onStreamFinished: {
         // `[]` is an empty container, which is an answer.
         var items = root.itemsFrom(text)
-        if (items === undefined) return
         if (items === null) {
           root.browseStatus = root.strings.browseError
           return
@@ -1068,8 +1084,6 @@ BarWidget {
     root.selectedIndex = 0
     root.filterText = ""
     filterField.text = ""
-    // The household's list is only read when something asks to see it.
-    if (root.browseAllServices) root.loadHouseholdServices()
   }
 
   /// Back one level, and out to favorites from the top.
@@ -1406,17 +1420,18 @@ BarWidget {
     return null
   }
 
-  /// Rows out of one `--json` reply, or a word for what went wrong.
+  /// Rows out of one `--json` reply, or `null` for a reply that is not one.
   ///
   /// Three `Process` handlers - search, browse, and one service's results - each
   /// carried this line for line, differing only in which status property they
-  /// wrote. `undefined` means the command said nothing at all, which is a
-  /// failure the exit code has already reported; `null` means it said something
-  /// unreadable. `[]` is a real answer meaning the service has nothing, and
-  /// reading the first two as the third would replace an error with a wrong
-  /// result.
+  /// wrote. `null` covers an empty body as well as an unreadable one: a command
+  /// that said nothing cannot be left to the exit code, since a search can exit
+  /// 0 with nothing on stdout, and every caller's `null` branch already writes
+  /// the failure and drops what was pending - so "Searching…" never outlives
+  /// the process. `[]` is a real answer meaning the service has nothing, and
+  /// reading a non-answer as that would replace an error with a wrong result.
   function itemsFrom(text) {
-    if (!text || text.trim() === "") return undefined
+    if (!text || text.trim() === "") return null
     var parsed
     try {
       parsed = JSON.parse(text)
@@ -2458,6 +2473,8 @@ BarWidget {
     // The row that opens the services index, which is also the index frame's
     // own name - so a service opened from it says "back to Services".
     "services": "Services",
+    // The note at the top of the index, saying what the list is for.
+    "servicesHint": "Open a service to browse it, or link one that has no account here",
     // Where "up" lands from the index: the favorites and kept items it opened over.
     "pickerHome": "Back",
     "up": "← %1",
@@ -2619,6 +2636,12 @@ BarWidget {
   readonly property bool browseAllServices: {
     var given = setting("browseServices", null)
     return typeof given === "string" && given.toLowerCase() === "all"
+  }
+  // `browseServices: []` is browsing turned off by hand - the third named mode
+  // of that setting, beside "all" and a list - and the Services door goes with it.
+  readonly property bool browsingOff: {
+    var given = setting("browseServices", null)
+    return Array.isArray(given) && given.length === 0
   }
 
   readonly property var browseServices: {
