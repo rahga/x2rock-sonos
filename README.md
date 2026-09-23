@@ -307,3 +307,91 @@ the popup and the picker, which are opened deliberately.
 - `manifest.json` — plugin metadata for Omarchy's loader.
 - `preview.png` — gallery screenshot for marketplace discovery.
 - `LICENSE` — 0BSD open source license.
+
+## Facts learned building this
+
+Moved here from `docs/architecture.md` on 2026-09-23: they are facts about Quickshell, Omarchy's
+plugin architecture and QML, and this widget is the only part of x2rock those touch. Dates are
+when each was learned.
+
+### Target platform: Omarchy 4.0 "Quattro"
+
+Confirmed from Omarchy's own repo (`basecamp/omarchy`, `quattro` branch) as of this writing:
+
+- Quattro (released 2026-08-14) rewrote Omarchy's entire shell — bar, launcher, notifications,
+  OSDs, lock screen — into one long-running **Quickshell** process with a plugin architecture.
+  This fully replaced the prior Waybar + Hyprland-config-script stack. **Do not design for
+  pre-Quattro Omarchy or generic Waybar-first integration** — Quattro is the only target.
+- Quickshell bar plugins support three integration shapes (source:
+  `shell/plugins/bar/README.md` in that repo):
+  1. **Command polling** — a plugin config declares `{"type":"command","exec":"...","interval":N}`;
+     output is plain text or Waybar-style JSON (`text`/`tooltip`/`class`). This is the lowest-effort
+     integration path and probably where `x2rock`'s CLI binary plugs in first.
+  2. **Native QML widgets** — get `bar`/`moduleName`/`settings` injected, can fire-and-forget shell
+     commands via `bar.run(...)`. More work, richer UI (needed for anything MPRIS can't express).
+  3. **Direct D-Bus/MPRIS subscription** — for widgets that want live now-playing data without
+     polling a command.
+- **MPRIS is still the built-in, first-class mechanism.** Omarchy ships a built-in (off-by-default)
+  `omarchy.media` plugin that reads MPRIS now-playing data directly (scrolling track/artist, cover
+  art, click/scroll transport controls) — see `manual/05-the-top-bar.md`. Enabled via
+  `omarchy plugin enable omarchy.media --section center`; config lives in
+  `~/.config/omarchy/shell.json` under `bar`.
+- **Practical implication**: publish a standard MPRIS2 interface and Omarchy's own `omarchy.media`
+  widget picks it up with zero custom code, same as Waybar's `mpris` module did before. A bespoke
+  Quickshell widget is only needed for things MPRIS genuinely can't express: multi-room grouping,
+  per-room/per-player volume, favorites. As built, that widget is a **native QML** plugin: it reads
+  x2rock's MPRIS players directly (`Quickshell.Services.Mpris`, with custom `x2rock:*` metadata
+  keys) and shells out to the `x2rock` binary, usually with `--json`, for anything MPRIS cannot
+  carry. It does not poll. Quickshell widgets are QML/JS; there is no Rust-native integration point.
+- No official upstream Quickshell documentation was directly verified — everything above comes
+  through Omarchy's own docs of how it uses Quickshell. If Quickshell has more integration surface
+  than Omarchy exposes, that is still undiscovered.
+- Later, also support Waybar per the original ask — since MPRIS is the shared mechanism, this
+  should come close to free once the MPRIS server exists; Waybar's `mpris` module needs no code on
+  x2rock's side at all.
+
+### Quickshell facts learned wiring the per-room volume sliders (2026-08-29)
+
+- **An `ai` metadata value does not reach QML as an array.** MPRIS metadata
+  carrying a D-Bus array of *strings* (`as`) arrives as an ordinary JS array;
+  the same shape as *ints* (`ai`) arrives with no length and no indexing. Member
+  volumes were published as `ai` and every slider silently read zero, while the
+  volumes themselves were being set correctly the whole time. Publish numbers as
+  decimal strings and parse them on the far side.
+- **Assigning the same object reference back is not a change.** A `property var`
+  holding a JS object, mutated in place and reassigned, notifies nothing - the
+  bindings that read it never re-run. Build a fresh object instead. This is what
+  made an optimistic "hold the value the user just asked for" fix appear to do
+  nothing at all.
+- **`PanelSlider` returns its handle to the bound value on release**
+  (`liveValue = value`). That is invisible for a slider bound to MPRIS, which
+  updates in the same frame, and very visible for one whose value has to go out
+  through the CLI and come back as an event. Anything in the second category
+  needs to hold the requested value until the device confirms it.
+- **A row that contains a control must not also be a click target.** The member
+  rows were MouseAreas whose click removed the room from the group, with a
+  volume slider inside them. Give the action its own small target and let the
+  control have the rest.
+- Debugging any of this from the outside is not possible: the fix was
+  `console.log` inside the QML, read back from
+  `/run/user/1000/quickshell/by-id/*/log.qslog`, which showed `members` arriving
+  as an array and `memberVolumes` as `""` in the same line.
+
+### Quickshell facts learned building the favorites picker (2026-08-29)
+
+- **A bar popup cannot take keyboard focus.** Omarchy's `PopupCard` takes a `HyprlandFocusGrab`,
+  which is for click-away dismissal only; it never sets `WlrLayershell.keyboardFocus`. Nothing in a
+  bar popup can be typed into, which is why no bar widget has a search box. `Ui/KeyboardPanel`
+  is the surface that does ask for keyboard focus, and it is what the menu, clipboard and emoji
+  pickers use. So the picker is a second surface, and opening it closes the room list. (The room
+  list itself later moved onto a `KeyboardPanel` too, which is what made it keyboard-driven; the
+  widget now uses no `PopupCard` at all.)
+- **Two surfaces must not share an `owner`.** Both `PopupCard` and `KeyboardPanel` dismiss by
+  calling `owner.close()`, so one owner means each closes the other. The picker gets its own.
+- **`Ui/PanelKeyCatcher` cannot carry a text filter.** It claims `h`/`j`/`k`/`l` as arrows, `x` as
+  delete and space as activate *before* emitting `textKey`, so a typed name loses letters. Its own
+  documentation points at the alternative - a real `TextField` with focus - which is what this uses,
+  with arrows and Enter handled on the field itself.
+- **Quickshell's Mpris has no `Playlists` interface**, only a `Playlist` loop-state value. Favorites
+  could not have reached the widget over MPRIS even if the daemon published them, which is why it
+  shells out to the CLI instead.
