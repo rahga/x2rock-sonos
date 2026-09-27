@@ -131,8 +131,10 @@ BarWidget {
   property string pendingTerm: ""
 
   // The services this machine holds a linked account for, read from
-  // `x2rock accounts --json`. That command reads one local file - no player,
-  // no service, no daemon - so it is the cheapest question the picker asks.
+  // `x2rock accounts --here --json`. That command reads local files - no
+  // player, no service, no daemon - so it is the cheapest question the picker
+  // asks. `--here` keeps it to the households seen on this network, so a
+  // laptop at home does not offer the office's services.
   // Feeds the default `browseServices`; see the binding below for why.
   property var linkedServices: []
 
@@ -1237,7 +1239,7 @@ BarWidget {
   // fallback is exactly the un-discovered default: a row for `searchService`.
   Process {
     id: accountsProc
-    command: [root.command, "accounts", "--json"]
+    command: [root.command, "accounts", "--here", "--json"]
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
