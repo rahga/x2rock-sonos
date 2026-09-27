@@ -1029,6 +1029,14 @@ BarWidget {
         // dropping someone out of a tree they were halfway down.
         root.browseStatus = root.strings.browseError
       }
+      // A service's root is where the CLI learns whether it can be walked at
+      // all, and it records the answer; re-reading the lists (two local files)
+      // is what takes a service that just refused, or answered with nothing,
+      // out of Services before the index is shown again.
+      if (root.browseStack.length === 1) {
+        root.loadLinkedServices()
+        if (root.browseAllServices) root.loadHouseholdServices()
+      }
     }
     stdout: StdioCollector {
       waitForEnd: true
@@ -1233,8 +1241,13 @@ BarWidget {
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
+        // A service the CLI has found nothing to walk in - refused, like Apple
+        // Music and YouTube Music, or empty, like Sonos Radio - is left out.
+        // Strictly `=== false`: `null` is "not browsed yet", and an older CLI
+        // sends no such field, and both keep the row.
         var names = root.sortedNames(text, function(entry) {
-          return String((entry && entry.service) || "")
+          if (!entry || entry.browsable === false) return ""
+          return String(entry.service || "")
         })
         // Leave whatever was already known; see the favorites picker.
         if (names !== null) root.linkedServices = names
