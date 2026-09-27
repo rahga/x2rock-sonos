@@ -44,6 +44,10 @@ Each room's music glyph opens the picker. Its rows, top to bottom:
 - **Services** — one door, always first (only `browseServices: []` removes it). Inside: an
   explainer line, every service the picker can walk, then a **Link** row for each service the
   household has that this machine holds no token for — in every mode, not only `"all"`.
+- **Recently played** — a second door, under Services, once the household has played anything:
+  what any controller played lately, newest first, as the Sonos app lists it. Choosing one plays it
+  again in the room, from the account the household uses for that service now. Items from a
+  service this machine has no account for are left out.
 - **Search** — appears once you type, runs itself when typing pauses (`searchDelay`), and its
   answers replace the row. With `searchService` set to `"linked"` or `"all"` it asks several
   services at once and groups the hits by service, the way the mobile app does; a service heading

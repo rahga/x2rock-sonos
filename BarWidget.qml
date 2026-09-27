@@ -83,6 +83,11 @@ BarWidget {
   // favorites, deliberately, so the picker concatenates rather than translates.
   property var bookmarks: []
   property bool bookmarksLoaded: false
+
+  // What the household played lately, from `x2rock recent --json` - the Sonos
+  // app's "Recently played", whichever controller played it. The favorites
+  // shape again; `id` is what `x2rock replay` takes back.
+  property var recent: []
   /// The queue panel's cursor, over the rows as listed. -1 until the first
   /// list arrives and puts it on whatever is playing.
   property int queueIndex: -1
@@ -168,6 +173,30 @@ BarWidget {
   readonly property bool browsingIndex: browsing && browseFrame
                                         && browseFrame.service === ""
                                         && browseFrame.id === servicesFrameId
+  /// Recently played is a frame too, for the same reasons as the index: "up"
+  /// and the back stack already work, and it answers itself from `recent`.
+  readonly property string recentFrameId: "recent"
+  readonly property bool browsingRecent: browsing && browseFrame
+                                         && browseFrame.service === ""
+                                         && browseFrame.id === recentFrameId
+
+  /// What can be played again, filtered like favorites. An item from a service
+  /// this machine holds no account for is `playable: false` and left out: the
+  /// CLI has already decided it cannot play it, and a row that only fails is a
+  /// dead end. `!== false` keeps rows from a CLI that sent no such field.
+  readonly property var shownRecent: {
+    var needle = filterText.toLowerCase().trim()
+    var found = []
+    for (var i = 0; i < recent.length; i++) {
+      var r = recent[i]
+      if (r.playable === false) continue
+      var name = String(r.name || "").toLowerCase()
+      var service = String(r.service || "").toLowerCase()
+      if (needle === "" || name.indexOf(needle) !== -1 || service.indexOf(needle) !== -1)
+        found.push(r)
+    }
+    return found
+  }
 
   /// Services that can be linked and are not. Fetched from `link --json`,
   /// which is the only listing that shows a service with no token - `browse`
@@ -278,12 +307,22 @@ BarWidget {
         item: {
           name: strings.up.arg(browseStack.length > 1
                                ? browseStack[browseStack.length - 2].title
-                               : (root.browsingIndex ? strings.pickerHome
-                                                     : browseFrame.service)),
+                               : (browseFrame.service === "" ? strings.pickerHome
+                                                             : browseFrame.service)),
           type: "",
           art_url: ""
         }
       }]
+      if (root.browsingRecent) {
+        var played = root.shownRecent
+        for (var r = 0; r < played.length; r++)
+          out.push({ kind: "recent", item: played[r] })
+        if (played.length === 0)
+          out.push({ kind: "note",
+                     item: { name: root.recent.length > 0 ? strings.noMatch : strings.noRecent,
+                             type: "", art_url: "" } })
+        return out
+      }
       // The index answers itself, so the guard below - which waits for a reply
       // - would never let its rows through.
       if (root.browsingIndex) {
@@ -358,6 +397,12 @@ BarWidget {
     if (!root.browsingOff)
       rows.push({ kind: "servicesIndex",
                   item: { name: strings.services, type: "", art_url: "" } })
+    // A second door, under the first, and only once there is something behind
+    // it: an empty history is a household that has played nothing, which is
+    // not worth a row that opens onto a note.
+    if (root.shownRecent.length > 0 && filterText.trim() === "")
+      rows.push({ kind: "recentIndex",
+                  item: { name: strings.recentlyPlayed, type: "", art_url: "" } })
 
     var favs = shownFavorites
     for (var i = 0; i < favs.length; i++) rows.push({ kind: "favorite", item: favs[i] })
@@ -375,7 +420,7 @@ BarWidget {
   function structuralRow(kind) {
     return kind === "serviceHeader" || kind === "categoryHeader"
            || kind === "backToResults" || kind === "up" || kind === "search"
-           || kind === "servicesIndex" || kind === "browseService"
+           || kind === "servicesIndex" || kind === "recentIndex" || kind === "browseService"
            || kind === "linkService" || kind === "note"
   }
 
@@ -683,6 +728,8 @@ BarWidget {
     else if (row.kind === "result") root.playSearchResult(root.pickingFor, row.item)
     else if (row.kind === "search") root.runSearch()
     else if (row.kind === "servicesIndex") root.openServicesIndex()
+    else if (row.kind === "recentIndex") root.openRecent()
+    else if (row.kind === "recent") root.playRecent(root.pickingFor, row.item)
     else if (row.kind === "serviceHeader") root.openServiceResults(row.item.service)
     else if (row.kind === "categoryHeader") root.expandCategory(row.item.category)
     else if (row.kind === "backToResults") root.closeServiceResults()
@@ -737,6 +784,7 @@ BarWidget {
     root.clearBrowse()
     root.loadFavorites()
     root.loadBookmarks()
+    root.loadRecent()
     // Re-read on every open, like favorites: an account linked in a terminal
     // minutes ago should not need a shell restart to reach the picker.
     root.loadLinkedServices()
@@ -1091,6 +1139,13 @@ BarWidget {
 
   /// Open the services index. A push like `browseInto`, minus the fetch: the
   /// list is `browseServices`, which is already known.
+  function openRecent() {
+    var stack = root.browseStack.slice()
+    stack.push({ service: "", id: root.recentFrameId, title: root.strings.recentlyPlayed })
+    root.browseStack = stack
+    root.resetBrowseView()
+  }
+
   function openServicesIndex() {
     var stack = root.browseStack.slice()
     stack.push({ service: "", id: root.servicesFrameId, title: root.strings.services })
@@ -1358,6 +1413,42 @@ BarWidget {
   // By id, not name: ids are unambiguous, and these names run to emoji and
   // full-width brackets. Passed as arguments rather than a command line, so
   // nothing needs quoting.
+  // Recently played, re-read on every open like favorites: what played a
+  // minute ago in the Sonos app belongs at the top now. Silent on failure -
+  // the door simply does not appear, which is what a household with no
+  // history shows anyway.
+  Process {
+    id: recentProc
+    command: [root.command, "recent", "--json"]
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        if (!text || text.trim() === "") return
+        try {
+          var parsed = JSON.parse(text)
+          if (Array.isArray(parsed)) root.recent = parsed
+        } catch (e) {}
+      }
+    }
+  }
+
+  function loadRecent() {
+    if (recentProc.running) return
+    recentProc.running = true
+  }
+
+  /// `replay` rather than `play-item`: the history names its item by the triple
+  /// the player loads directly, and the CLI swaps a dead account for the live
+  /// one on the way.
+  function playRecent(room, item) {
+    if (!item || playProc.running) return
+    root.focusedName = room
+    playProc.command = [root.command, "replay", String(item.id), "-r", room]
+    playProc.running = true
+    root.closePicker()
+    root.backToRooms()
+  }
+
   function playFavorite(room, favorite) {
     if (!favorite || playProc.running) return
     root.focusedName = room
@@ -2451,6 +2542,8 @@ BarWidget {
     // The row that opens the services index, which is also the index frame's
     // own name - so a service opened from it says "back to Services".
     "services": "Services",
+    "recentlyPlayed": "Recently played",
+    "noRecent": "Nothing played lately",
     // The note at the top of the index, saying what the list is for.
     "servicesHint": "Open a service to browse it, or link one that has no account here",
     // Where "up" lands from the index: the favorites and kept items it opened over.
@@ -3794,7 +3887,8 @@ BarWidget {
             anchors.right: parent.right
             anchors.rightMargin: Style.space(8)
             visible: entry.kind === "container" || entry.kind === "browseService"
-                     || entry.kind === "servicesIndex" || entry.kind === "serviceHeader"
+                     || entry.kind === "servicesIndex" || entry.kind === "recentIndex"
+                     || entry.kind === "serviceHeader"
                      || entry.kind === "linkService"
                      || (entry.kind === "categoryHeader" && entry.payload.more !== "")
             text: "›"
@@ -3914,7 +4008,7 @@ BarWidget {
               // go, and the subtitle would otherwise print that name a second
               // time directly beneath itself.
               text: !entry.actionable || root.structuralRow(entry.kind) ? ""
-                    : root.browsing ? root.browseSubtitle(entry.payload)
+                    : root.browsing && !root.browsingRecent ? root.browseSubtitle(entry.payload)
                     : root.favoriteSubtitle(entry.payload)
               color: root.secondaryFg
               font.family: root.bar.fontFamily
