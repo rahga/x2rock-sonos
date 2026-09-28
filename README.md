@@ -5,7 +5,7 @@ Sonos rooms in the bar: now-playing, transport, per-room volume, a music picker
 or search them all at once), grouping, party mode, and rating a track up or down
 where the service offers it. Driven entirely by the `x2rock daemon`'s MPRIS players.
 
-Needs `x2rock` on `PATH` and `x2rock daemon` running. When no Sonos players are detected, the widget hides itself.
+Needs `x2rock` on `PATH` and `x2rock daemon` running. Cover art is fetched by `x2rock art`, which caps each image at 2 MB and keeps a cache under `~/.cache/x2rock/art` below 50 MB; with an `x2rock` too old to have it, covers show a placeholder glyph. When no Sonos players are detected, the widget hides itself.
 
 ![The popup: every room with per-room transport, volume and TV badges](preview.png)
 

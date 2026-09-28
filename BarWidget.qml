@@ -52,7 +52,10 @@ BarWidget {
   property bool popupOpen: false
   // Nothing pushes night sound or speech enhancement, so they are re-read when
   // the popup opens - see refreshSoundbar.
-  onPopupOpenChanged: if (popupOpen) root.refreshSoundbar()
+  onPopupOpenChanged: if (popupOpen) {
+    root.refreshSoundbar()
+    root.retryFailedArt()
+  }
   // Only the rooms popup. The picker, the queue and the grouping panel are
   // separate surfaces with owners of their own, because a shared one would
   // have each closing the other: a KeyboardPanel dismisses by calling
@@ -1407,6 +1410,123 @@ BarWidget {
   }
 
   Process { id: playProc }
+
+  // Cover art goes through `x2rock art`, never straight to an `Image`: that
+  // command fetches only https or a speaker's own :1400, caps each image in
+  // bytes and time, checks it is an image, and keeps it in a bounded cache.
+  // What comes back is a local file, and `CoverArt` loads nothing else.
+  //
+  // `artFiles` maps an art URL to its file URL - or to "" once a fetch has
+  // failed, so the placeholder shows and the URL is not asked for again
+  // until the popup next opens. A URL not in it yet is queued, and sent in
+  // batches to up to four processes at once, each printing a row the moment
+  // its image lands (`--each`): one slow CDN holds up its own cover, not the
+  // list, and a list opened meanwhile does not wait behind it.
+  property var artFiles: ({})
+  // Plain JS state, not read by any binding, so changing it notifies nothing:
+  // what is waiting, what a process has been given, what has landed but not
+  // yet been folded into `artFiles`, and how many processes are out.
+  property var artWanted: []
+  property var artInFlight: ({})
+  property var artLanded: ({})
+  property int artRunning: 0
+
+  function artFor(url) {
+    if (!url) return ""
+    var file = root.artFiles[url]
+    if (file !== undefined) return file
+    // Runs inside the bindings that ask, and runs again for every URL still
+    // loading each time `artFiles` moves - so anything already asked for is
+    // left alone rather than queued twice.
+    if (root.artInFlight[url] !== true && root.artWanted.indexOf(url) < 0) {
+      root.artWanted.push(url)
+      Qt.callLater(root.fetchArt)
+    }
+    return ""
+  }
+
+  function fetchArt() {
+    while (root.artRunning < 4 && root.artWanted.length > 0) {
+      var batch = root.artWanted.slice(0, 40)
+      root.artWanted = root.artWanted.slice(40)
+      for (var i = 0; i < batch.length; i++) root.artInFlight[batch[i]] = true
+      var proc = artProcComponent.createObject(root, {
+        asked: batch,
+        command: [root.command, "art", "--each"].concat(batch)
+      })
+      if (!proc) {
+        root.artFinished(batch)
+        continue
+      }
+      root.artRunning++
+      proc.running = true
+    }
+  }
+
+  // One `--each` row: noted now, folded in with whatever else lands this turn.
+  function artRow(line) {
+    var row
+    try {
+      row = JSON.parse(line)
+    } catch (e) {
+      return
+    }
+    if (!row || !row.url) return
+    root.artLanded[row.url] = row.path ? "file://" + encodeURI(row.path) : ""
+    delete root.artInFlight[row.url]
+    Qt.callLater(root.foldArt)
+  }
+
+  function foldArt() {
+    var landed = root.artLanded
+    root.artLanded = ({})
+    if (Object.keys(landed).length === 0) return
+    var next = ({})
+    // A long session sees a great many covers; start over rather than grow.
+    if (Object.keys(root.artFiles).length < 1000)
+      for (var k in root.artFiles) next[k] = root.artFiles[k]
+    for (var u in landed) next[u] = landed[u]
+    root.artFiles = next
+  }
+
+  // A process is done: anything it was given and never answered for - an
+  // x2rock too old to have `art` answers for none of it - is a failure.
+  function artFinished(asked) {
+    for (var i = 0; i < asked.length; i++) {
+      if (root.artInFlight[asked[i]] === true) {
+        delete root.artInFlight[asked[i]]
+        root.artLanded[asked[i]] = ""
+      }
+    }
+    Qt.callLater(root.foldArt)
+    Qt.callLater(root.fetchArt)
+  }
+
+  function retryFailedArt() {
+    var next = ({})
+    var dropped = false
+    for (var k in root.artFiles) {
+      if (root.artFiles[k] === "") dropped = true
+      else next[k] = root.artFiles[k]
+    }
+    if (dropped) root.artFiles = next
+  }
+
+  Component {
+    id: artProcComponent
+    Process {
+      id: artProc
+      property var asked: []
+      stdout: SplitParser {
+        onRead: function(line) { root.artRow(line) }
+      }
+      onExited: function(code) {
+        root.artRunning--
+        root.artFinished(artProc.asked)
+        artProc.destroy()
+      }
+    }
+  }
 
   // Re-read on every open. Favorites change rarely, but they do change - and
   // whoever added one in the Sonos app should not have to restart the shell to
@@ -3129,7 +3249,7 @@ BarWidget {
                 visible: root.showArt
                 width: visible ? size : 0
                 size: Style.space(root.artSize)
-                url: roomRow.player.trackArtUrl || ""
+                url: root.artFor(roomRow.player.trackArtUrl || "")
                 // TV audio carries no artwork, and a speaker glyph for it says
                 // the wrong thing - what is playing is the television.
                 placeholder: root.onTvInput(roomRow.player)
@@ -3936,7 +4056,7 @@ BarWidget {
             // A container often does have art - services give their own sections
             // icons - so it keeps its tile; scaffolding never does.
             visible: root.showArt && !root.structuralRow(entry.kind)
-            url: entry.payload.art_url || ""
+            url: root.artFor(entry.payload.art_url || "")
             placeholder: root.glyphs.speaker
             foreground: root.bar.foreground
             fontFamily: root.bar.fontFamily
@@ -4221,7 +4341,7 @@ BarWidget {
             anchors.left: parent.left
             anchors.leftMargin: Style.space(6)
             size: Style.space(root.pickerArtSize)
-            url: track.modelData.art_url || ""
+            url: root.artFor(track.modelData.art_url || "")
             placeholder: root.glyphs.speaker
             foreground: root.bar.foreground
             fontFamily: root.bar.fontFamily
