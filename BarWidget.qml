@@ -839,7 +839,8 @@ BarWidget {
     var due = []
     for (var i = 0; i < root.rooms.length; i++) {
       var p = root.rooms[i]
-      if (p && root.onTvInput(p)) due.push(p.identity)
+      // `eq` reads over UPnP, so with it off the read can only fail.
+      if (p && root.onTvInput(p) && !root.upnpOff(p)) due.push(p.identity)
     }
     root.soundbarQueue = due
     root.nextSoundbarRead()
@@ -1187,7 +1188,7 @@ BarWidget {
   /// no such field, and undefined must hide the button rather than offer one
   /// that cannot work.
   function canQueue(item) {
-    return !!(item && item.queueable === true)
+    return !!(item && item.queueable === true) && !root.householdUpnpOff
   }
 
   Process {
@@ -1562,6 +1563,27 @@ BarWidget {
 
   function hasTvInput(player) {
     return root.metaFlag(player, "x2rock:hasTvInput")
+  }
+
+  /// Whether the household has UPnP switched off, which refuses everything
+  /// x2rock does over SOAP: the queue, the TV input switch, night sound and
+  /// speech enhancement as writes, adding to the queue from search. The
+  /// household's switch, so every room says the same; absent from an older
+  /// daemon, which reads as on and offers everything as before.
+  function upnpOff(player) {
+    return root.metaFlag(player, "x2rock:upnpOff")
+  }
+  readonly property bool householdUpnpOff: {
+    for (var i = 0; i < root.rooms.length; i++)
+      if (root.upnpOff(root.rooms[i])) return true
+    return false
+  }
+
+  /// Whether the TV glyph does anything: a TV input to switch to, and UPnP to
+  /// switch it over. The glyph itself still shows on a room that is already on
+  /// its TV input, lit, because that is news whether or not it can be pressed.
+  function canSwitchToTv(player) {
+    return root.hasTvInput(player) && !root.upnpOff(player)
   }
 
   // Whether the thumbs mean anything on this row. The daemon publishes whether
@@ -3038,7 +3060,7 @@ BarWidget {
           } else if (event.key === Qt.Key_F) {
             if (player) root.openPicker(player.identity)
           } else if (event.key === Qt.Key_Q) {
-            if (player) root.openQueue(player.identity)
+            if (player && !root.upnpOff(player)) root.openQueue(player.identity)
           } else if (event.key === Qt.Key_G) {
             // The keys are only offered where the glyphs are: no grouping or
             // party in a one-speaker household, no TV on a speaker without one.
@@ -3046,7 +3068,7 @@ BarWidget {
           } else if (event.key === Qt.Key_Y) {
             if (player && root.totalRooms > 1) root.toggleParty(player.identity)
           } else if (event.key === Qt.Key_T) {
-            if (root.hasTvInput(player)) root.switchToTv(player.identity)
+            if (root.canSwitchToTv(player)) root.switchToTv(player.identity)
           } else if (event.key === Qt.Key_U) {
             root.rateTrack(player, true)
           } else if (event.key === Qt.Key_D) {
@@ -3269,7 +3291,10 @@ BarWidget {
                 // it: changing what this room plays is not the same errand as
                 // deciding which rooms play along.
                 Text {
-                  visible: root.hasTvInput(roomRow.player)
+                  // With UPnP off there is no switching to it, but a room that
+                  // is already on its TV input still says so.
+                  visible: root.canSwitchToTv(roomRow.player)
+                    || (root.hasTvInput(roomRow.player) && root.onTvInput(roomRow.player))
                   text: root.glyphs.tv
                   // Lit while it is the source, dim while it is merely available.
                   color: root.onTvInput(roomRow.player)
@@ -3281,6 +3306,7 @@ BarWidget {
                     id: tvMouse
                     anchors.fill: parent
                     anchors.margins: -Style.space(4)
+                    enabled: root.canSwitchToTv(roomRow.player)
                     hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
                     onClicked: root.switchToTv(roomRow.player.identity)
@@ -3540,7 +3566,9 @@ BarWidget {
                   // short of one would grow its slider by a glyph.
                   visible: root.onTvInput(roomRow.player)
                   opacity: settingOn !== undefined ? 1 : 0
-                  enabled: settingOn !== undefined
+                  // Still shown with UPnP off - the daemon reads them over the
+                  // Control API, so the state is true - but the write is UPnP.
+                  enabled: settingOn !== undefined && !root.upnpOff(roomRow.player)
                   text: root.glyphs[modelData.glyph]
                   color: settingOn === true ? root.bar.foreground : root.offFg
                   font.family: root.bar.fontFamily
@@ -3552,7 +3580,7 @@ BarWidget {
                     anchors.fill: parent
                     anchors.margins: -Style.space(4)
                     hoverEnabled: true
-                    cursorShape: Qt.PointingHandCursor
+                    cursorShape: soundbarButton.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
                     onClicked: root.toggleSoundbar(roomRow.player,
                                                    soundbarButton.modelData.key,
                                                    soundbarButton.modelData.flag)
@@ -3590,6 +3618,11 @@ BarWidget {
                 font.family: root.bar.fontFamily
                 font.pixelSize: Style.font.body
                 anchors.verticalCenter: parent.verticalCenter
+                // The queue is read over UPnP. Held blank rather than dropped,
+                // like the soundbar pair, so the slider beside it keeps its
+                // width.
+                opacity: root.upnpOff(roomRow.player) ? 0 : 1
+                enabled: !root.upnpOff(roomRow.player)
 
                 MouseArea {
                   anchors.fill: parent
