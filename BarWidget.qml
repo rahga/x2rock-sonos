@@ -13,6 +13,13 @@ import qs.Commons
 // wants those as *relative* changes, which MPRIS cannot express.
 //
 // When the daemon is not running there are no players and the widget hides.
+//
+// **Every `Text` here is `textFormat: Text.PlainText`.** Titles, artists,
+// station names and search results come from remote music services, and Qt's
+// default `AutoText` renders anything that looks like markup as rich text - a
+// title could restyle the row or load an external image into the shell. Give
+// a new `Text` the same line, even one that only ever shows a glyph, so this
+// stays checkable as "all of them".
 BarWidget {
   id: root
   moduleName: "x2rock.sonos"
@@ -2964,6 +2971,7 @@ BarWidget {
   // controls that act on it; on the bar it was a lone word that changed under
   // you as focus moved. Hovering still names it, and the track, in the tooltip.
   Text {
+    textFormat: Text.PlainText
     id: glyph
     anchors.centerIn: parent
     text: root.glyphs.speaker
@@ -3151,6 +3159,7 @@ BarWidget {
                     spacing: Style.space(8)
 
                     Text {
+                      textFormat: Text.PlainText
                       text: roomRow.player.identity || "?"
                       color: root.bar.foreground
                       font.family: root.bar.fontFamily
@@ -3159,6 +3168,7 @@ BarWidget {
                     }
 
                     Text {
+                      textFormat: Text.PlainText
                       visible: root.showState
                       text: roomRow.player.isPlaying ? root.strings.playing : root.strings.paused
                       color: root.offFg
@@ -3173,6 +3183,7 @@ BarWidget {
                 // reading at a glance rather than on purpose: a source that has
                 // dropped to stereo says so nowhere else.
                 Text {
+                  textFormat: Text.PlainText
                   width: parent.width
                   visible: text !== ""
                   text: root.inputFormatOf(roomRow.player)
@@ -3183,6 +3194,7 @@ BarWidget {
                 }
 
                 Text {
+                  textFormat: Text.PlainText
                   width: parent.width
                   visible: root.showMembers && text !== ""
                   text: {
@@ -3206,6 +3218,7 @@ BarWidget {
                   visible: nowText.text !== ""
 
                   Text {
+                    textFormat: Text.PlainText
                     id: nowMark
                     visible: root.isLiveStream(roomRow.player)
                     // A hidden Item still reports its implicit width, and Row
@@ -3239,6 +3252,7 @@ BarWidget {
                   }
 
                   Text {
+                    textFormat: Text.PlainText
                     id: nowText
                     // Whatever the mark did not take, so a long title elides at
                     // the row's edge rather than past it. Computed from the
@@ -3264,6 +3278,7 @@ BarWidget {
                 // empty station used to cover and no longer can now that the
                 // headline is promoted over it.
                 Text {
+                  textFormat: Text.PlainText
                   width: parent.width
                   visible: text !== "" && text !== nowText.text
                   text: root.stationLabel(roomRow.player)
@@ -3291,6 +3306,7 @@ BarWidget {
                 // it: changing what this room plays is not the same errand as
                 // deciding which rooms play along.
                 Text {
+                  textFormat: Text.PlainText
                   // With UPnP off there is no switching to it, but a room that
                   // is already on its TV input still says so.
                   visible: root.canSwitchToTv(roomRow.player)
@@ -3325,6 +3341,7 @@ BarWidget {
 
                   // Nothing to party with in a one-speaker household.
                   Text {
+                    textFormat: Text.PlainText
                     id: partyButton
                     visible: root.totalRooms > 1
                     text: root.glyphs.party
@@ -3354,6 +3371,7 @@ BarWidget {
                   // one builds a group a room at a time, the other builds the
                   // whole-house one, and they are the same decision at two sizes.
                   Text {
+                    textFormat: Text.PlainText
                     // Only worth offering when there is another room to group with.
                     visible: root.totalRooms > 1
                     text: root.glyphs.group
@@ -3393,6 +3411,7 @@ BarWidget {
               spacing: Style.space(10)
 
               Text {
+                textFormat: Text.PlainText
                 text: root.glyphs.previous
                 // Held, not hidden - see transportAvailable.
                 opacity: root.transportAvailable(roomRow.player) ? 1 : 0
@@ -3412,6 +3431,7 @@ BarWidget {
               }
 
               Text {
+                textFormat: Text.PlainText
                 text: root.stopRather(roomRow.player)
                   ? root.glyphs.stop
                   : (roomRow.player.isPlaying ? root.glyphs.pause : root.glyphs.play)
@@ -3432,6 +3452,7 @@ BarWidget {
               }
 
               Text {
+                textFormat: Text.PlainText
                 text: root.glyphs.next
                 // Held, not hidden - see transportAvailable.
                 opacity: root.transportAvailable(roomRow.player) ? 1 : 0
@@ -3454,6 +3475,7 @@ BarWidget {
               // root.rateable - rather than wherever the transport is: a live
               // stream or the TV input has thumbs that could only ever fail.
               Text {
+                textFormat: Text.PlainText
                 text: root.glyphs.thumbsUp
                 opacity: root.rateable(roomRow.player) ? 1 : 0
                 enabled: root.rateable(roomRow.player)
@@ -3471,6 +3493,7 @@ BarWidget {
               }
 
               Text {
+                textFormat: Text.PlainText
                 text: root.glyphs.thumbsDown
                 opacity: root.rateable(roomRow.player) ? 1 : 0
                 enabled: root.rateable(roomRow.player)
@@ -3490,6 +3513,7 @@ BarWidget {
               // A radio stream dims this the way an unskippable one dims next:
               // see root.repeatAvailable for what the source is allowed to do.
               Text {
+                textFormat: Text.PlainText
                 id: repeatButton
                 readonly property bool available: root.repeatAvailable(roomRow.player)
 
@@ -3514,6 +3538,7 @@ BarWidget {
               }
 
               Text {
+                textFormat: Text.PlainText
                 id: shuffleButton
                 readonly property bool available: root.shuffleAvailable(roomRow.player)
 
@@ -3548,6 +3573,7 @@ BarWidget {
                     tip: root.strings.tooltipSpeech },
                 ]
                 Text {
+                  textFormat: Text.PlainText
                   id: soundbarButton
                   required property var modelData
                   // Not `state`: QQuickItem already has one, and shadowing it
@@ -3598,6 +3624,7 @@ BarWidget {
               // play. The room is whichever row the note was on, so choosing
               // never involves choosing a room as well.
               Text {
+                textFormat: Text.PlainText
                 text: root.glyphs.music
                 color: root.bar.foreground
                 font.family: root.bar.fontFamily
@@ -3613,6 +3640,7 @@ BarWidget {
               }
 
               Text {
+                textFormat: Text.PlainText
                 text: root.glyphs.queue
                 color: root.bar.foreground
                 font.family: root.bar.fontFamily
@@ -3662,6 +3690,7 @@ BarWidget {
               }
 
               Text {
+                textFormat: Text.PlainText
                 id: volumeLabel
                 // See root.volumeLabelWidth.
                 width: root.volumeLabelWidth
@@ -3698,6 +3727,7 @@ BarWidget {
       anchors.fill: parent
 
       Text {
+        textFormat: Text.PlainText
         id: pickerTitle
         anchors.top: parent.top
         anchors.left: parent.left
@@ -3719,6 +3749,7 @@ BarWidget {
       }
 
       Text {
+        textFormat: Text.PlainText
         id: pickerCount
         anchors.verticalCenter: pickerTitle.verticalCenter
         anchors.right: parent.right
@@ -3820,6 +3851,7 @@ BarWidget {
       }
 
       Text {
+        textFormat: Text.PlainText
         id: pickerStatus
         // Only when there is genuinely nothing to show. A status must not
         // pre-empt the list: on a household with no favorites at all,
@@ -3915,6 +3947,7 @@ BarWidget {
           // mark a container playable and still refuse its id, so the widget
           // must never offer one as a track.
           Text {
+            textFormat: Text.PlainText
             id: entryInto
             anchors.verticalCenter: parent.verticalCenter
             anchors.right: parent.right
@@ -3934,6 +3967,7 @@ BarWidget {
           // opening the service; on a category heading it is revealing the rest
           // of that category, which only says so while there is a rest.
           Text {
+            textFormat: Text.PlainText
             anchors.verticalCenter: parent.verticalCenter
             anchors.right: entryInto.left
             anchors.rightMargin: Style.space(3)
@@ -3958,6 +3992,7 @@ BarWidget {
           // see `canQueue`. A row that cannot be queued simply has no button,
           // rather than one that reports a failure after the fact.
           Text {
+            textFormat: Text.PlainText
             id: entryAdd
             anchors.verticalCenter: parent.verticalCenter
             anchors.right: parent.right
@@ -3993,6 +4028,7 @@ BarWidget {
           // "play" even means. Left of the name, after the cover, so the
           // names still start on one line down the list.
           Text {
+            textFormat: Text.PlainText
             id: entryMark
             anchors.verticalCenter: parent.verticalCenter
             anchors.left: entryArt.visible ? entryArt.right : parent.left
@@ -4020,6 +4056,7 @@ BarWidget {
             spacing: Style.space(1)
 
             Text {
+              textFormat: Text.PlainText
               width: parent.width
               text: entry.payload.name || ""
               // A note is not an offer, so it does not get the foreground the
@@ -4031,6 +4068,7 @@ BarWidget {
             }
 
             Text {
+              textFormat: Text.PlainText
               width: parent.width
               visible: text !== ""
               // Inside a container the service is already in the title, so the
@@ -4070,6 +4108,7 @@ BarWidget {
       anchors.fill: parent
 
       Text {
+        textFormat: Text.PlainText
         id: queueTitle
         anchors.top: parent.top
         anchors.left: parent.left
@@ -4081,6 +4120,7 @@ BarWidget {
       }
 
       Text {
+        textFormat: Text.PlainText
         anchors.verticalCenter: queueTitle.verticalCenter
         anchors.right: parent.right
         visible: root.queueTotal > 0
@@ -4092,6 +4132,7 @@ BarWidget {
       }
 
       Text {
+        textFormat: Text.PlainText
         id: queueStatusText
         visible: root.queueStatus !== ""
         text: root.queueStatus
@@ -4196,6 +4237,7 @@ BarWidget {
             spacing: Style.space(1)
 
             Text {
+              textFormat: Text.PlainText
               width: parent.width
               // Named rather than blank. The Sonos app's "..." -> Play Now adds
               // a queue entry with no metadata at all - verified 2026-09-01,
@@ -4214,6 +4256,7 @@ BarWidget {
             }
 
             Text {
+              textFormat: Text.PlainText
               width: parent.width
               visible: text !== ""
               text: track.modelData.artist || ""
@@ -4235,6 +4278,7 @@ BarWidget {
             visible: track.containsMouse
 
             Text {
+              textFormat: Text.PlainText
               text: root.glyphs.moveUp
               color: track.index > 0 ? root.bar.foreground : root.disabledFg
               font.family: root.bar.fontFamily
@@ -4250,6 +4294,7 @@ BarWidget {
             }
 
             Text {
+              textFormat: Text.PlainText
               text: root.glyphs.moveDown
               color: track.index < root.queueItems.length - 1
                 ? root.bar.foreground : root.disabledFg
@@ -4267,6 +4312,7 @@ BarWidget {
             }
 
             Text {
+              textFormat: Text.PlainText
               text: root.glyphs.remove
               color: root.bar.foreground
               font.family: root.bar.fontFamily
@@ -4330,6 +4376,7 @@ BarWidget {
         spacing: Style.space(8)
 
         Text {
+          textFormat: Text.PlainText
           text: root.groupingFor
           color: root.bar.foreground
           font.family: root.bar.fontFamily
@@ -4345,6 +4392,7 @@ BarWidget {
           height: togetherHeading.implicitHeight
 
           Text {
+            textFormat: Text.PlainText
             id: togetherHeading
             anchors.left: parent.left
             text: root.strings.playingTogether
@@ -4357,6 +4405,7 @@ BarWidget {
           // while their levels differ. Named under the pointer, as leave is,
           // because circular arrows alone read as "refresh".
           Text {
+            textFormat: Text.PlainText
             visible: root.groupingUneven
             anchors.verticalCenter: togetherHeading.verticalCenter
             anchors.right: parent.right
@@ -4412,6 +4461,7 @@ BarWidget {
             }
 
             Text {
+              textFormat: Text.PlainText
               id: memberName
               anchors.top: parent.top
               anchors.topMargin: Style.space(4)
@@ -4424,6 +4474,7 @@ BarWidget {
             }
 
             Text {
+              textFormat: Text.PlainText
               // The coordinator is the group; the others leave it.
               visible: memberRow.modelData !== root.groupingCoordinator
               anchors.verticalCenter: memberName.verticalCenter
@@ -4476,6 +4527,7 @@ BarWidget {
             }
 
             Text {
+              textFormat: Text.PlainText
               anchors.verticalCenter: memberVolume.verticalCenter
               anchors.right: parent.right
               anchors.rightMargin: Style.space(8)
@@ -4489,6 +4541,7 @@ BarWidget {
         }
 
         Text {
+          textFormat: Text.PlainText
           visible: root.groupingOthers.length > 0
           text: root.groupingMembers.length > 1 ? root.strings.addAnother : root.strings.playTogetherWith
           color: root.offFg
@@ -4521,6 +4574,7 @@ BarWidget {
             }
 
             Text {
+              textFormat: Text.PlainText
               id: otherName
               anchors.verticalCenter: parent.verticalCenter
               anchors.left: parent.left
@@ -4532,6 +4586,7 @@ BarWidget {
             }
 
             Text {
+              textFormat: Text.PlainText
               anchors.verticalCenter: parent.verticalCenter
               anchors.right: parent.right
               anchors.rightMargin: Style.space(8)
@@ -4545,6 +4600,7 @@ BarWidget {
         }
 
         Text {
+          textFormat: Text.PlainText
           visible: root.groupingOthers.length === 0 && root.groupingMembers.length > 1
           text: root.strings.everyRoomGrouped
           color: root.secondaryFg
