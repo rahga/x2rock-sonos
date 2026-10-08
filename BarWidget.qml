@@ -2328,6 +2328,11 @@ BarWidget {
   // this is the one that usually gets there first.
   property string queueFor: ""
   property var queueItems: []
+  // The `UpdateID` the list on screen was read at - `version` in `queue
+  // --json`. Every move and remove quotes it, so an edit worked out on rows
+  // that have since renumbered is refused by the player rather than applied
+  // to whatever now sits at that position; the refusal re-reads the list.
+  property string queueListVersion: ""
   property int queueTotal: 0
   property string queueStatus: ""
 
@@ -2368,6 +2373,7 @@ BarWidget {
         }
         root.queueItems = parsed.items || []
         root.queueTotal = parsed.total || 0
+        root.queueListVersion = parsed.version ? String(parsed.version) : ""
         root.queueStatus = root.queueItems.length > 0 ? "" : root.strings.nothingQueued
         // Only the first list after opening places the cursor - a reload from
         // a version bump must not drag it out from under whoever is scrolling.
@@ -2419,6 +2425,7 @@ BarWidget {
     root.queueIndex = -1
     root.queueItems = []
     root.queueTotal = 0
+    root.queueListVersion = ""
     root.queueStatus = ""
     root.queueFor = room
     root.popupOpen = false
@@ -2442,7 +2449,8 @@ BarWidget {
 
   function queueEdit(args) {
     if (queueEditProc.running) return
-    queueEditProc.command = [root.command, "queue"].concat(args).concat(["-r", root.queueFor])
+    var at = root.queueListVersion !== "" ? ["--at", root.queueListVersion] : []
+    queueEditProc.command = [root.command, "queue"].concat(args).concat(at).concat(["-r", root.queueFor])
     queueEditProc.running = true
   }
 
