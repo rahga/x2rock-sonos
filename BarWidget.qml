@@ -29,7 +29,11 @@ BarWidget {
     var found = []
     for (var i = 0; i < players.length; i++) {
       var p = players[i]
-      if (p && String(p.dbusName || "").indexOf("org.mpris.MediaPlayer2.x2rock-") === 0)
+      // The daemon's own test (mpris.rs `is_ours`): the stem, then nothing or a
+      // dash - a room with no ASCII in its name is the bare `x2rock`.
+      var name = String(p && p.dbusName || "")
+      var stem = "org.mpris.MediaPlayer2.x2rock"
+      if (name.indexOf(stem) === 0 && (name.length === stem.length || name.charAt(stem.length) === "-"))
         found.push(p)
     }
     found.sort(function(a, b) {
