@@ -1149,7 +1149,7 @@ BarWidget {
     root.browseStatus = ""
     root.selectedIndex = 0
     root.filterText = ""
-    filterField.text = ""
+    if (filterLoader.item) filterLoader.item.text = ""
   }
 
   /// Open the services index. A push like `browseInto`, minus the fetch: the
@@ -3851,7 +3851,7 @@ BarWidget {
     owner: pickerOwner
     open: root.pickingFor !== ""
     // Qt needs a focused item inside the surface before any key handler runs.
-    focusTarget: filterField
+    focusTarget: filterLoader.item
     contentWidth: pickerPanel.fittedContentWidth(Style.space(root.panelWidth))
     contentHeight: pickerPanel.fittedContentHeight(Style.space(440))
 
@@ -3928,57 +3928,66 @@ BarWidget {
         font.pixelSize: Style.font.caption
       }
 
-      TextField {
-        id: filterField
+      // The field exists only while the picker is on screen. A KeyboardPanel
+      // keeps its content alive while hidden, and a live editable TextField
+      // follows clipboard changes - Qt fetches a foreign clipboard's text with
+      // no size or time limit - so a closed picker must hold no TextField.
+      Loader {
+        id: filterLoader
+        active: pickerPanel.visible
         anchors.top: pickerTitle.bottom
         anchors.topMargin: Style.space(8)
         anchors.left: parent.left
         anchors.right: parent.right
-        placeholderText: root.strings.filterHint
-        foreground: root.bar.foreground
-        font.family: root.bar.fontFamily
+        sourceComponent: Component {
+          TextField {
+            placeholderText: root.strings.filterHint
+            foreground: root.bar.foreground
+            font.family: root.bar.fontFamily
 
-        onTextChanged: {
-          // The old position means nothing once the list is a different list,
-          // and this goes first so `onPickerRowsChanged` can settle it.
-          root.selectedIndex = 0
-          root.filterText = text
-          root.armSearch()
-          // A stale "could not reach" under a query nobody has run yet reads as
-          // if the new text had already failed.
-          if (root.searchStatus !== "" && !searchProc.running) root.searchStatus = ""
-        }
+            onTextChanged: {
+              // The old position means nothing once the list is a different list,
+              // and this goes first so `onPickerRowsChanged` can settle it.
+              root.selectedIndex = 0
+              root.filterText = text
+              root.armSearch()
+              // A stale "could not reach" under a query nobody has run yet reads as
+              // if the new text had already failed.
+              if (root.searchStatus !== "" && !searchProc.running) root.searchStatus = ""
+            }
 
-        // Arrows and Enter drive the list while the text keeps arriving here.
-        // PanelKeyCatcher is deliberately not used: it claims h/j/k/l/x and
-        // space as navigation, which a typed name cannot survive.
-        Keys.onPressed: function(event) {
-          var items = root.pickerRows
-          if (event.key === Qt.Key_Escape) {
-            root.closePicker()
-          } else if (event.key === Qt.Key_Left && root.serviceResultsFor !== "") {
-            // No `text === ""` guard, unlike the browse arm below: the drill-in
-            // deliberately leaves the search term in the box and never filters
-            // by it, so the box is never empty and that guard made this branch
-            // unreachable. Left alone, not Backspace, because Backspace still
-            // means "edit the term" and this surface has nothing else to edit.
-            root.closeServiceResults()
-          } else if ((event.key === Qt.Key_Backspace || event.key === Qt.Key_Left)
-                     && root.browsing && text === "") {
-            // Only on an empty field. Both keys mean something to a text cursor,
-            // and a filter someone is still editing outranks navigation.
-            root.browseUp()
-          } else if (event.key === Qt.Key_Down) {
-            root.selectedIndex = root.stepSelection(1)
-          } else if (event.key === Qt.Key_Up) {
-            root.selectedIndex = root.stepSelection(-1)
-          } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
-            if (items.length > 0)
-              root.activateRow(items[root.selectedIndex])
-          } else {
-            return
+            // Arrows and Enter drive the list while the text keeps arriving here.
+            // PanelKeyCatcher is deliberately not used: it claims h/j/k/l/x and
+            // space as navigation, which a typed name cannot survive.
+            Keys.onPressed: function(event) {
+              var items = root.pickerRows
+              if (event.key === Qt.Key_Escape) {
+                root.closePicker()
+              } else if (event.key === Qt.Key_Left && root.serviceResultsFor !== "") {
+                // No `text === ""` guard, unlike the browse arm below: the drill-in
+                // deliberately leaves the search term in the box and never filters
+                // by it, so the box is never empty and that guard made this branch
+                // unreachable. Left alone, not Backspace, because Backspace still
+                // means "edit the term" and this surface has nothing else to edit.
+                root.closeServiceResults()
+              } else if ((event.key === Qt.Key_Backspace || event.key === Qt.Key_Left)
+                         && root.browsing && text === "") {
+                // Only on an empty field. Both keys mean something to a text cursor,
+                // and a filter someone is still editing outranks navigation.
+                root.browseUp()
+              } else if (event.key === Qt.Key_Down) {
+                root.selectedIndex = root.stepSelection(1)
+              } else if (event.key === Qt.Key_Up) {
+                root.selectedIndex = root.stepSelection(-1)
+              } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+                if (items.length > 0)
+                  root.activateRow(items[root.selectedIndex])
+              } else {
+                return
+              }
+              event.accepted = true
+            }
           }
-          event.accepted = true
         }
       }
 
@@ -3999,14 +4008,14 @@ BarWidget {
         color: root.secondaryFg
         font.family: root.bar.fontFamily
         font.pixelSize: Style.font.caption
-        anchors.top: filterField.bottom
+        anchors.top: filterLoader.bottom
         anchors.topMargin: Style.space(10)
         anchors.left: parent.left
       }
 
       ListView {
         id: pickerList
-        anchors.top: filterField.bottom
+        anchors.top: filterLoader.bottom
         anchors.topMargin: Style.space(8)
         anchors.left: parent.left
         anchors.right: parent.right
