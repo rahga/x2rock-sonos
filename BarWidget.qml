@@ -136,8 +136,8 @@ BarWidget {
 
   // Searching a music service, which is the one thing here that leaves the LAN
   // - and it does so in a Process of its own, never in the daemon, so a slow or
-  // unreachable service cannot delay a single control. See "Rule: search never
-  // enters the daemon" in docs/architecture.md.
+  // unreachable service cannot delay a single control. See "Rule: talking to a
+  // service never enters the daemon" in docs/architecture.md.
   property var searchResults: []
   property string searchStatus: ""
   /// The term `searchResults` are answers to. Results are only shown while the
@@ -3346,17 +3346,17 @@ BarWidget {
                 // anything. The glyph carries it in the width a glyph costs.
                 Row {
                   width: parent.width
-                  spacing: nowMark.visible ? Style.space(4) : 0
+                  spacing: Style.space(4)
                   visible: nowText.text !== ""
 
                   Text {
                     textFormat: Text.PlainText
                     id: nowMark
                     visible: root.isLiveStream(roomRow.player)
-                    // A hidden Item still reports its implicit width, and Row
-                    // lays out only what is visible - so the title's width has
-                    // to ask whether the mark is there, not just how wide it is.
-                    width: visible ? implicitWidth : 0
+                    // No width of its own: `width: visible ? implicitWidth : 0`
+                    // was a binding loop on width once a stream showed the mark.
+                    // Row lays out only visible children, so a hidden mark
+                    // takes no room, and the title below accounts for it.
                     text: root.glyphs.radio
                     color: root.secondaryFg
                     font.family: root.bar.fontFamily
@@ -3388,10 +3388,13 @@ BarWidget {
                     id: nowText
                     // Whatever the mark did not take, so a long title elides at
                     // the row's edge rather than past it. Computed from the
-                    // mark rather than from this item's own `x`: inside a Row
-                    // the layout assigns `x`, and a width that reads it is a
-                    // binding loop waiting for a second glyph to be added.
-                    width: parent.width - nowMark.width - parent.spacing
+                    // mark's natural width rather than from this item's own
+                    // `x`: inside a Row the layout assigns `x`, and a width
+                    // that reads it would loop. A hidden mark takes nothing,
+                    // spacing included, since a hidden Item still reports an
+                    // implicit width.
+                    width: parent.width
+                           - (nowMark.visible ? nowMark.implicitWidth + parent.spacing : 0)
                     // Station name when there is no title at all: without the
                     // fallback the whole line hides, and the mark goes with it,
                     // so a playing stream would show nothing rather than less.
