@@ -394,8 +394,12 @@ Confirmed from Omarchy's own repo (`basecamp/omarchy`, `quattro` branch) as of t
   calling `owner.close()`, so one owner means each closes the other. The picker gets its own.
 - **`Ui/PanelKeyCatcher` cannot carry a text filter.** It claims `h`/`j`/`k`/`l` as arrows, `x` as
   delete and space as activate *before* emitting `textKey`, so a typed name loses letters. Its own
-  documentation points at the alternative - a real `TextField` with focus - which is what this uses,
-  with arrows and Enter handled on the field itself.
+  documentation points at the alternative, a real `TextField` with focus.
+- **The filter is not a `TextField` either.** Every editable Qt text item follows the clipboard and
+  fetches a foreign clipboard's text on each change, with no size or time limit, which the
+  marketplace review would not accept in a shared shell. The filter is a plain focused `Item` that
+  builds the query from key events: typed characters append, Backspace erases from the end, and
+  arrows and Enter drive the list. There is no paste, selection or input method.
 - **Quickshell's Mpris has no `Playlists` interface**, only a `Playlist` loop-state value. Favorites
   could not have reached the widget over MPRIS even if the daemon published them, which is why it
   shells out to the CLI instead.
