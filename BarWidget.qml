@@ -1629,6 +1629,9 @@ BarWidget {
   /// reading a non-answer as that would replace an error with a wrong result.
   function itemsFrom(text) {
     if (!text || text.trim() === "") return null
+    // A reply this large did not come from a healthy run - x2rock bounds what it
+    // prints - so it is treated as unreadable rather than parsed and held.
+    if (text.length > root.maxReplyBytes) return null
     var parsed
     try {
       parsed = JSON.parse(text)
@@ -2332,6 +2335,23 @@ BarWidget {
   // this is the one that usually gets there first.
   property string queueFor: ""
   property var queueItems: []
+  // A `queue --json` process is launched for one room, but its reply arrives
+  // later - and the view may have switched rooms or closed by then. The guard
+  // the other LAN processes use (`serviceResultsFor`) is a room name; a name
+  // alone cannot tell a reply for a room from a *stale* reply for the same room
+  // reopened, so this counts opens and closes instead. `loadQueue` stamps the
+  // in-flight process with the generation it was launched under; a reply whose
+  // stamp no longer matches is discarded rather than shown under whoever is
+  // looking now - which is how an unfinished room-A fetch ended up populating
+  // room B's panel, with A's positions then quoted into B's edits.
+  property int queueGeneration: 0
+  property int queueLoadingGen: -1
+  // A reply longer than this is treated as a failure, not parsed: `queue`,
+  // `search` and `browse` output is bounded on the x2rock side (capped item
+  // counts, clipped fields), so anything near this never came from a healthy
+  // run, and `JSON.parse` on it would be the one place the widget copies an
+  // unbounded string.
+  readonly property int maxReplyBytes: 8 * 1024 * 1024
   // The `UpdateID` the list on screen was read at - `version` in `queue
   // --json`. Every move and remove quotes it, so an edit worked out on rows
   // that have since renumbered is refused by the player rather than applied
@@ -2359,15 +2379,31 @@ BarWidget {
   Process {
     id: queueProc
     onExited: function(code) {
-      if (code !== 0) root.queueStatus = root.strings.queueError
+      // Only the room this reply was for may write its status; a reply the view
+      // has moved past is handled by `resyncQueue`, not by its exit code.
+      if (root.queueLoadingGen === root.queueGeneration) {
+        if (code !== 0) root.queueStatus = root.strings.queueError
+      }
+      // Deferred, not called here: `onExited` and `onStreamFinished` can land in
+      // either order, and re-reading now would reset the stamp before the other
+      // handler has read it. `Qt.callLater` runs once the current pass is done.
+      Qt.callLater(root.resyncQueue)
     }
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
+        // The reply is for a room the view has since left or switched away from:
+        // showing A's rows under room B would quote A's positions into B's
+        // edits. Discard it; `resyncQueue` fetches whatever is open now.
+        if (root.queueLoadingGen !== root.queueGeneration) return
         // An unreachable player leaves stdout empty. That is not an empty
         // queue, and whichever of this and onExited runs first, the error it
         // sets must be the word that stands.
         if (!text || text.trim() === "") return
+        if (text.length > root.maxReplyBytes) {
+          root.queueStatus = root.strings.queueError
+          return
+        }
         var parsed
         try {
           parsed = JSON.parse(text)
@@ -2419,24 +2455,42 @@ BarWidget {
   function loadQueue() {
     if (root.queueFor === "" || queueProc.running) return
     if (root.queueItems.length === 0) root.queueStatus = root.strings.loading
+    // Stamp the run with the generation it belongs to, so its reply can be told
+    // from one for a room since switched away from.
+    root.queueLoadingGen = root.queueGeneration
     queueProc.command = [root.command, "queue", "--json", "-r", root.queueFor]
     queueProc.running = true
   }
 
+  // Fetch whatever room is open now, if the last launched read was for an older
+  // generation and the process is free. Run deferred from the queue process's
+  // handlers: a room switched or closed while a read was in flight cannot start
+  // its own read (the process was busy), so the finishing read starts it.
+  function resyncQueue() {
+    if (queueProc.running) return
+    if (root.queueFor !== "" && root.queueLoadingGen !== root.queueGeneration)
+      root.loadQueue()
+  }
+
   function openQueue(room) {
     root.focusedName = room
+    // A new thing to look at: bump the generation so any reply still in flight
+    // for the last one is discarded rather than shown here.
+    root.queueGeneration += 1
     // Not yet placed: the first list to arrive puts it on the playing track.
     root.queueIndex = -1
     root.queueItems = []
     root.queueTotal = 0
     root.queueListVersion = ""
-    root.queueStatus = ""
+    root.queueStatus = root.strings.loading
     root.queueFor = room
     root.popupOpen = false
     root.loadQueue()
   }
 
   function closeQueue() {
+    // Bump too, so a reply arriving after the panel is gone is discarded.
+    root.queueGeneration += 1
     root.queueFor = ""
     root.queueItems = []
   }
